@@ -244,6 +244,15 @@
 - 门禁执行引擎拆分
 - 验收测试清单
 
+## 实施进展（2026-03-30）
+
+已完成：
+1. run ledger 数据模型与 API（`runs/run_steps/triggers/gate_profiles`）
+2. Gate Profile 持久化与 GateEvaluator（命令门禁评估）
+3. Trigger 幂等注册服务（`idempotency_key` 去重）
+4. Runner 集成 run ledger + gate enforcement（门禁失败自动 `blocked`）
+5. CLI 可观测命令：`runs`, `run-steps`, `triggers`, `gate-profile`
+
 ## 14. 会话连续性策略（新增）
 
 为支持同一任务的多轮修改，控制面采用 **reuse-first** 会话策略：
