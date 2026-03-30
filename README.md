@@ -15,6 +15,7 @@ A DB-first task and issue management system designed for multiple coding agents.
 - Board and stats views in terminal
 - Markdown export per project
 - Lightweight HTML dashboard generation
+- Interactive web console (task center + run timeline)
 - Multi-agent safe claiming with lease/heartbeat/release
 - Adapter protocol for integrating multiple coding agents
 - Trigger idempotency (`idempotency_key`) to prevent duplicate runs
@@ -47,6 +48,7 @@ agentflow discover-issues --project kthena --from-file ./examples/issues.json
 agentflow handle-comment --project kthena --payload-file ./examples/comment.json --adapter mock --agent codex-webhook
 agentflow board --project kthena
 agentflow dashboard --db ./data/agentflow.db --out ./dashboard.html
+agentflow serve --db ./data/agentflow.db --host 127.0.0.1 --port 8787
 ```
 
 ## Implemented Now
@@ -57,6 +59,26 @@ agentflow dashboard --db ./data/agentflow.db --out ./dashboard.html
 - Gate inspection: `gate-profile`
 - Scheduled discovery ingestion: `discover-issues`
 - Comment-event execution ingestion: `handle-comment`
+- Web console server: `serve`
+
+## Web Console
+
+Start the control console:
+
+```bash
+agentflow serve --db ./data/agentflow.db --host 127.0.0.1 --port 8787
+```
+
+Then open:
+
+`http://127.0.0.1:8787`
+
+Current console capabilities:
+
+- Task center list with search and status filter
+- Task detail pane with history and scoring fields
+- Run timeline drawer with run steps
+- One-click task execution (`POST /api/task/{id}/run`) for adapter-triggered run
 
 ## Event-Driven Workflow (Current CLI Form)
 

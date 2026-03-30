@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .adapters.registry import AdapterRegistry
+from .console import serve_console
 from .reports import build_dashboard_html, export_markdown
 from .services.discovery import IssueDiscoveryService
 from .services.runner import Runner
@@ -73,6 +74,10 @@ def _parser() -> argparse.ArgumentParser:
 
     p_dashboard = sub.add_parser("dashboard", help="Generate HTML dashboard")
     p_dashboard.add_argument("--out", default="./dashboard.html")
+
+    p_serve = sub.add_parser("serve", help="Start interactive web console")
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8787)
 
     p_runs = sub.add_parser("runs", help="List runs for a task")
     p_runs.add_argument("--task-id", required=True, type=int)
@@ -220,6 +225,10 @@ def main() -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(html, encoding="utf-8")
         print(f"dashboard written: {out_path}")
+        return
+
+    if args.command == "serve":
+        serve_console(args.host, args.port, args.db)
         return
 
     if args.command == "runs":

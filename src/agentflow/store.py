@@ -366,6 +366,26 @@ class Store:
             rows = conn.execute(sql, args).fetchall()
             return [Task(**dict(row)) for row in rows]
 
+    def get_task(self, task_id: int) -> Task | None:
+        with self.connect() as conn:
+            row = conn.execute(self._base_task_sql() + " WHERE t.id = ?", (task_id,)).fetchone()
+            if row is None:
+                return None
+            return Task(**dict(row))
+
+    def list_status_history(self, task_id: int) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, task_id, from_status, to_status, note, changed_at
+                FROM status_history
+                WHERE task_id = ?
+                ORDER BY id DESC
+                """,
+                (task_id,),
+            ).fetchall()
+            return list(rows)
+
     def get_task_by_external(self, project: str, source: str, external_id: str) -> Task | None:
         with self.connect() as conn:
             row = conn.execute(

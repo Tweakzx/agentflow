@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from agentflow.cli import _parser
 from agentflow.store import Store
 
 
@@ -113,6 +114,12 @@ class CliSmokeTests(unittest.TestCase):
 
         self.assertIn("created=1", disc_out)
         self.assertIn("accepted=True", webhook_out)
+
+    def test_serve_command_parser_defaults(self) -> None:
+        args = _parser().parse_args(["serve"])
+        self.assertEqual(args.command, "serve")
+        self.assertEqual(args.host, "127.0.0.1")
+        self.assertEqual(args.port, 8787)
 
 
 if __name__ == "__main__":
