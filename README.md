@@ -83,8 +83,7 @@ Current console capabilities:
 
 - Task center list with search and status filter
 - Stage/source filter for issue collection and process routing
-- Project metric cards (pending/in-progress/blocked/recent runs)
-- Status board columns for quick triage (supports drag-and-drop stage transition)
+- Status board as top-level workflow view (supports drag-and-drop stage transition)
 - Recent run stream with adapter/agent timeline
 - Task detail pane with history and run steps
 - Manual task flow transition (`pending/approved/in_progress/pr_ready/...`) with notes and optional force

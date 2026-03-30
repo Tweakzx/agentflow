@@ -55,21 +55,6 @@ INDEX_HTML = """<!doctype html>
     .brand { font-size: 20px; font-weight: 700; letter-spacing: 0.3px; }
     .sub { color: var(--muted); font-size: 12px; }
     .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      padding: 12px 14px 0;
-    }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px 12px;
-      box-shadow: 0 4px 14px rgba(17, 42, 71, 0.06);
-    }
-    .card .k { font-size: 11px; color: var(--muted); }
-    .card .v { font-size: 24px; font-weight: 700; margin-top: 2px; }
     .layout {
       display: grid;
       grid-template-columns: 33% 1fr;
@@ -165,14 +150,12 @@ INDEX_HTML = """<!doctype html>
       font-size: 13px;
     }
     @media (max-width: 1200px) {
-      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .layout { grid-template-columns: 1fr; }
       .board-wrap { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .split { grid-template-columns: 1fr; }
       .detail-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
     }
     @media (max-width: 700px) {
-      .grid { grid-template-columns: 1fr; }
       .board-wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .detail-grid { grid-template-columns: 1fr; }
     }
@@ -192,7 +175,10 @@ INDEX_HTML = """<!doctype html>
     </div>
   </div>
 
-  <section class=\"grid\" id=\"cards\"></section>
+  <section class=\"panel\" style=\"margin: 14px 14px 0\">
+    <h3>Status Board</h3>
+    <div id=\"board\" class=\"board-wrap\"></div>
+  </section>
 
   <div class=\"layout\">
     <section class=\"panel\">
@@ -218,11 +204,6 @@ INDEX_HTML = """<!doctype html>
     </section>
   </div>
 
-  <section class=\"panel\" style=\"margin: 0 14px 14px\">
-    <h3>Status Board</h3>
-    <div id=\"board\" class=\"board-wrap\"></div>
-  </section>
-
   <section class=\"split\">
     <section class=\"panel\">
       <h3>Recent Runs</h3>
@@ -243,7 +224,6 @@ INDEX_HTML = """<!doctype html>
       autoTimer: null,
       recentRuns: [],
       audit: [],
-      stats: {},
     };
 
     async function api(url, opts) {
@@ -312,30 +292,12 @@ INDEX_HTML = """<!doctype html>
 
     async function loadStatsAndRuns() {
       const project = currentProject();
-      const statsData = await api(`/api/stats?project=${encodeURIComponent(project)}`);
       const runsData = await api(`/api/runs/recent?project=${encodeURIComponent(project)}&limit=20`);
       const auditData = await api(`/api/audit?project=${encodeURIComponent(project)}&limit=30`);
-      state.stats = statsData;
       state.recentRuns = runsData.runs || [];
       state.audit = auditData.events || [];
-      renderCards();
       renderRecentRuns();
       renderAudit();
-    }
-
-    function renderCards() {
-      const counts = state.stats.status_counts || {};
-      const cards = [
-        { k: 'Collected', v: counts.pending || 0 },
-        { k: 'Triaged', v: counts.approved || 0 },
-        { k: 'In Progress', v: counts.in_progress || 0 },
-        { k: 'Blocked', v: counts.blocked || 0 },
-        { k: 'Review', v: (counts.pr_ready || 0) + (counts.pr_open || 0) },
-        { k: 'Done', v: (counts.merged || 0) + (counts.skipped || 0) },
-        { k: 'Recent Runs', v: state.stats.recent_run_count || 0 },
-      ];
-      const root = document.getElementById('cards');
-      root.innerHTML = cards.map(c => `<div class=\"card\"><div class=\"k\">${c.k}</div><div class=\"v\">${c.v}</div></div>`).join('');
     }
 
     function renderTaskList() {
