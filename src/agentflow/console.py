@@ -202,6 +202,12 @@ INDEX_HTML = """<!doctype html>
         <select id=\"statusFilter\" onchange=\"renderTaskList()\">
           <option value=\"\">all status</option>
         </select>
+        <select id=\"stageFilter\" onchange=\"renderTaskList()\">
+          <option value=\"\">all stages</option>
+        </select>
+        <select id=\"sourceFilter\" onchange=\"renderTaskList()\">
+          <option value=\"\">all sources</option>
+        </select>
       </div>
       <div id=\"taskList\" class=\"task-list\"></div>
     </section>
@@ -251,6 +257,16 @@ INDEX_HTML = """<!doctype html>
 
     function statusClass(status) { return status === 'blocked' ? 'err' : ''; }
 
+    function stageOf(status) {
+      if (status === 'pending') return 'collected';
+      if (status === 'approved') return 'triaged';
+      if (status === 'in_progress') return 'executing';
+      if (status === 'pr_ready' || status === 'pr_open') return 'review';
+      if (status === 'merged' || status === 'skipped') return 'done';
+      if (status === 'blocked') return 'blocked';
+      return 'other';
+    }
+
     async function loadProjects() {
       const data = await api('/api/projects');
       state.projects = data.projects || [];
@@ -269,10 +285,20 @@ INDEX_HTML = """<!doctype html>
       const data = await api(`/api/tasks?project=${encodeURIComponent(currentProject())}`);
       state.tasks = data.tasks || [];
       const statuses = [...new Set(state.tasks.map(t => t.status))].sort();
+      const stages = [...new Set(state.tasks.map(t => stageOf(t.status)))].sort();
+      const sources = [...new Set(state.tasks.map(t => t.source || 'unknown'))].sort();
       const statusSel = document.getElementById('statusFilter');
+      const stageSel = document.getElementById('stageFilter');
+      const sourceSel = document.getElementById('sourceFilter');
       const old = statusSel.value;
+      const oldStage = stageSel.value;
+      const oldSource = sourceSel.value;
       statusSel.innerHTML = '<option value="">all status</option>' + statuses.map(s => `<option value=\"${s}\">${s}</option>`).join('');
+      stageSel.innerHTML = '<option value="">all stages</option>' + stages.map(s => `<option value=\"${s}\">${s}</option>`).join('');
+      sourceSel.innerHTML = '<option value="">all sources</option>' + sources.map(s => `<option value=\"${s}\">${s}</option>`).join('');
       if (statuses.includes(old)) statusSel.value = old;
+      if (stages.includes(oldStage)) stageSel.value = oldStage;
+      if (sources.includes(oldSource)) sourceSel.value = oldSource;
       renderTaskList();
       renderBoard();
     }
@@ -290,10 +316,13 @@ INDEX_HTML = """<!doctype html>
     function renderCards() {
       const counts = state.stats.status_counts || {};
       const cards = [
-        { k: 'Pending', v: counts.pending || 0 },
+        { k: 'Collected', v: counts.pending || 0 },
+        { k: 'Triaged', v: counts.approved || 0 },
         { k: 'In Progress', v: counts.in_progress || 0 },
         { k: 'Blocked', v: counts.blocked || 0 },
-        { k: 'Recent Runs (24h)', v: state.stats.recent_run_count || 0 },
+        { k: 'Review', v: (counts.pr_ready || 0) + (counts.pr_open || 0) },
+        { k: 'Done', v: (counts.merged || 0) + (counts.skipped || 0) },
+        { k: 'Recent Runs', v: state.stats.recent_run_count || 0 },
       ];
       const root = document.getElementById('cards');
       root.innerHTML = cards.map(c => `<div class=\"card\"><div class=\"k\">${c.k}</div><div class=\"v\">${c.v}</div></div>`).join('');
@@ -302,8 +331,12 @@ INDEX_HTML = """<!doctype html>
     function renderTaskList() {
       const q = document.getElementById('q').value.trim().toLowerCase();
       const st = document.getElementById('statusFilter').value;
+      const stage = document.getElementById('stageFilter').value;
+      const source = document.getElementById('sourceFilter').value;
       state.filtered = state.tasks.filter(t => {
         if (st && t.status !== st) return false;
+        if (stage && stageOf(t.status) !== stage) return false;
+        if (source && (t.source || 'unknown') !== source) return false;
         if (q && !t.title.toLowerCase().includes(q)) return false;
         return true;
       });
@@ -316,6 +349,7 @@ INDEX_HTML = """<!doctype html>
         <div class=\"task ${state.selectedTask && state.selectedTask.id === t.id ? 'active' : ''}\" onclick=\"openTask(${t.id})\">
           <div class=\"task-title\">#${t.id} ${t.title}</div>
           <div class=\"meta\">
+            <span>${stageOf(t.status)}</span>
             <span class=\"${statusClass(t.status)}\">${t.status}</span>
             <span>p${t.priority}/i${t.impact}/e${t.effort}</span>
             <span>${t.assigned_agent || '-'}</span>
@@ -364,6 +398,7 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div class=\"detail-title\">${t.title}</div>
         <div class=\"sub\">source: ${t.source || '-'} ${t.external_id || ''}</div>
+        <div class=\"sub\">flow stage: <strong>${stageOf(t.status)}</strong></div>
         ${t.pr_url ? `<div class=\"sub\">PR: <a href=\"${t.pr_url}\" target=\"_blank\">${t.pr_url}</a></div>` : ''}
         <div class=\"detail-grid\">
           <div class=\"stat\"><div class=\"k\">Priority</div><div class=\"v\">${t.priority}</div></div>
@@ -377,6 +412,20 @@ INDEX_HTML = """<!doctype html>
           <select id=\"adapterSel\"><option value=\"mock\">mock</option></select>
           <input id=\"agentInput\" placeholder=\"agent name\" value=\"web-console-agent\" />
           <button onclick=\"runTask(${t.id})\">Run Task</button>
+        </div>
+        <div class=\"detail-actions\">
+          <select id=\"moveStatusSel\">
+            <option value=\"pending\">pending</option>
+            <option value=\"approved\">approved</option>
+            <option value=\"in_progress\">in_progress</option>
+            <option value=\"pr_ready\">pr_ready</option>
+            <option value=\"pr_open\">pr_open</option>
+            <option value=\"merged\">merged</option>
+            <option value=\"skipped\">skipped</option>
+            <option value=\"blocked\">blocked</option>
+          </select>
+          <input id=\"moveNoteInput\" placeholder=\"note for manual transition\" />
+          <button class=\"secondary\" onclick=\"moveTask(${t.id})\">Update Flow</button>
         </div>
         <div class=\"history\">
           <h4 style=\"margin:0 0 8px\">Status History</h4>
@@ -393,6 +442,8 @@ INDEX_HTML = """<!doctype html>
           `).join('') || '<div class=\"sub\">No runs yet</div>'}
         </div>
       `;
+      const moveSel = document.getElementById('moveStatusSel');
+      if (moveSel) moveSel.value = t.status;
     }
 
     async function runTask(taskId) {
@@ -410,6 +461,23 @@ INDEX_HTML = """<!doctype html>
         alert(res.message || 'run completed');
       } catch (err) {
         alert(`run failed: ${err}`);
+      }
+    }
+
+    async function moveTask(taskId) {
+      const toStatus = document.getElementById('moveStatusSel').value;
+      const note = document.getElementById('moveNoteInput').value || '';
+      try {
+        const res = await api(`/api/task/${taskId}/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to_status: toStatus, note })
+        });
+        await refreshAll();
+        await openTask(taskId);
+        alert(res.message || 'task moved');
+      } catch (err) {
+        alert(`move failed: ${err}`);
       }
     }
 
@@ -467,6 +535,20 @@ def _verify_signature(secret: str | None, body: bytes, signature_header: str | N
         return False
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature_header)
+
+
+def _flow_stage_for_status(status: str) -> str:
+    mapping = {
+        "pending": "collected",
+        "approved": "triaged",
+        "in_progress": "executing",
+        "pr_ready": "review",
+        "pr_open": "review",
+        "merged": "done",
+        "skipped": "done",
+        "blocked": "blocked",
+    }
+    return mapping.get(status, "other")
 
 
 def _build_handler(
@@ -554,6 +636,19 @@ def _build_handler(
                 self._send_json({"runs": rows})
                 return
 
+            if path == "/api/flow":
+                project = query.get("project", [None])[0]
+                if not project:
+                    self._send_json({"error": "project is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                tasks = [_task_to_dict(t) for t in store.list_tasks(project)]
+                grouped: dict[str, list[dict[str, Any]]] = {}
+                for task in tasks:
+                    stage = _flow_stage_for_status(str(task.get("status", "")))
+                    grouped.setdefault(stage, []).append(task)
+                self._send_json({"project": project, "stages": grouped})
+                return
+
             if path.startswith("/api/task/"):
                 parts = path.strip("/").split("/")
                 if len(parts) == 3:
@@ -606,6 +701,38 @@ def _build_handler(
                         "message": run.message,
                         "success": run.success,
                         "task": _task_to_dict(run.task) if run.task is not None else None,
+                    }
+                )
+                return
+
+            if path.startswith("/api/task/") and path.endswith("/move"):
+                parts = path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._send_json({"error": "invalid path"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    task_id = int(parts[2])
+                except ValueError:
+                    self._send_json({"error": "invalid task id"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                payload = self._parse_json(body)
+                to_status = str(payload.get("to_status") or "").strip()
+                note = payload.get("note")
+                if not to_status:
+                    self._send_json({"error": "to_status is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    store.move_task(task_id, to_status, str(note) if note is not None else None)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                task = store.get_task(task_id)
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"task {task_id} moved to {to_status}",
+                        "task": _task_to_dict(task) if task is not None else None,
+                        "stage": _flow_stage_for_status(to_status),
                     }
                 )
                 return

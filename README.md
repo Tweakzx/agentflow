@@ -82,10 +82,12 @@ Then open:
 Current console capabilities:
 
 - Task center list with search and status filter
+- Stage/source filter for issue collection and process routing
 - Project metric cards (pending/in-progress/blocked/recent runs)
 - Status board columns for quick triage
 - Recent run stream with adapter/agent timeline
 - Task detail pane with history and run steps
+- Manual task flow transition (`pending/approved/in_progress/pr_ready/...`) with notes
 - One-click task execution (`POST /api/task/{id}/run`) for adapter-triggered run
 
 Webhook endpoints exposed by `serve`:
@@ -99,6 +101,11 @@ Webhook endpoints exposed by `serve`:
 - `POST /webhook/github?project=<project>&adapter=mock&agent=bot`
   - Uses `X-GitHub-Event` for event routing (`issue_comment`, `pull_request_review_comment`, `issues`, `ping`)
   - Optional signature header support: `X-Hub-Signature-256`
+
+Additional console APIs:
+
+- `GET /api/flow?project=<project>`: grouped tasks by flow stage (`collected/triaged/executing/review/done/blocked`)
+- `POST /api/task/<id>/move`: manual flow transition with payload `{"to_status":"approved","note":"..."}`.
 
 ## Event-Driven Workflow (Current CLI Form)
 
