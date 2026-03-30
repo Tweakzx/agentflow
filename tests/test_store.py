@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agentflow_hub.store import Store
+from agentflow.store import Store
 
 
 class StoreTests(unittest.TestCase):

@@ -1,4 +1,4 @@
-# AgentFlow Hub
+# AgentFlow
 
 A DB-first task and issue management system designed for multiple coding agents.
 

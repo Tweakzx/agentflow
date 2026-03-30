@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentflow-hub"
+name = "agentflow"
 version = "0.1.0"
 description = "DB-first task and issue management core for multiple coding agents"
 readme = "README.md"
@@ -13,7 +13,7 @@ license = { text = "MIT" }
 dependencies = []
 
 [project.scripts]
-agentflow = "agentflow_hub.cli:main"
+agentflow = "agentflow.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

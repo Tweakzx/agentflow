@@ -51,7 +51,7 @@ def build_dashboard_html(store: Store) -> str:
 <html>
 <head>
 <meta charset=\"utf-8\" />
-<title>AgentFlow Hub Dashboard</title>
+<title>AgentFlow Dashboard</title>
 <style>
 body {{ font-family: 'Segoe UI', sans-serif; margin: 24px; color: #1b2430; background: linear-gradient(135deg, #f8fbff, #eef5ff); }}
 .card {{ background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); max-width: 1000px; }}
@@ -62,7 +62,7 @@ th {{ background: #f3f8ff; }}
 </head>
 <body>
 <div class=\"card\">
-<h1>AgentFlow Hub Dashboard</h1>
+<h1>AgentFlow Dashboard</h1>
 <p>Generated from SQLite source of truth.</p>
 <table>
 <thead><tr><th>Project</th>{''.join(f'<th>{s}</th>' for s in statuses)}</tr></thead>

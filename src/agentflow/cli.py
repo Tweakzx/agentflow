@@ -8,7 +8,7 @@ from .store import Store
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agentflow", description="AgentFlow Hub CLI")
+    parser = argparse.ArgumentParser(prog="agentflow", description="AgentFlow CLI")
     parser.add_argument("--db", default="./data/agentflow.db", help="SQLite DB path")
 
     sub = parser.add_subparsers(dest="command", required=True)
