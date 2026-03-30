@@ -176,7 +176,7 @@ INDEX_HTML = """<!doctype html>
   </div>
 
   <section class=\"panel\" style=\"margin: 14px 14px 0\">
-    <h3>Status Board</h3>
+    <h3>Stage Board</h3>
     <div id=\"board\" class=\"board-wrap\"></div>
   </section>
 
@@ -185,9 +185,6 @@ INDEX_HTML = """<!doctype html>
       <h3>Task Queue</h3>
       <div class=\"filters\">
         <input id=\"q\" placeholder=\"search title...\" oninput=\"renderTaskList()\" />
-        <select id=\"statusFilter\" onchange=\"renderTaskList()\">
-          <option value=\"\">all status</option>
-        </select>
         <select id=\"stageFilter\" onchange=\"renderTaskList()\">
           <option value=\"\">all stages</option>
         </select>
@@ -271,19 +268,14 @@ INDEX_HTML = """<!doctype html>
     async function loadTasks() {
       const data = await api(`/api/tasks?project=${encodeURIComponent(currentProject())}`);
       state.tasks = data.tasks || [];
-      const statuses = [...new Set(state.tasks.map(t => t.status))].sort();
       const stages = [...new Set(state.tasks.map(t => stageOf(t.status)))].sort();
       const sources = [...new Set(state.tasks.map(t => t.source || 'unknown'))].sort();
-      const statusSel = document.getElementById('statusFilter');
       const stageSel = document.getElementById('stageFilter');
       const sourceSel = document.getElementById('sourceFilter');
-      const old = statusSel.value;
       const oldStage = stageSel.value;
       const oldSource = sourceSel.value;
-      statusSel.innerHTML = '<option value="">all status</option>' + statuses.map(s => `<option value=\"${s}\">${s}</option>`).join('');
       stageSel.innerHTML = '<option value="">all stages</option>' + stages.map(s => `<option value=\"${s}\">${s}</option>`).join('');
       sourceSel.innerHTML = '<option value="">all sources</option>' + sources.map(s => `<option value=\"${s}\">${s}</option>`).join('');
-      if (statuses.includes(old)) statusSel.value = old;
       if (stages.includes(oldStage)) stageSel.value = oldStage;
       if (sources.includes(oldSource)) sourceSel.value = oldSource;
       renderTaskList();
@@ -302,11 +294,9 @@ INDEX_HTML = """<!doctype html>
 
     function renderTaskList() {
       const q = document.getElementById('q').value.trim().toLowerCase();
-      const st = document.getElementById('statusFilter').value;
       const stage = document.getElementById('stageFilter').value;
       const source = document.getElementById('sourceFilter').value;
       state.filtered = state.tasks.filter(t => {
-        if (st && t.status !== st) return false;
         if (stage && stageOf(t.status) !== stage) return false;
         if (source && (t.source || 'unknown') !== source) return false;
         if (q && !t.title.toLowerCase().includes(q)) return false;
@@ -322,7 +312,6 @@ INDEX_HTML = """<!doctype html>
           <div class=\"task-title\">#${t.id} ${t.title}</div>
           <div class=\"meta\">
             <span>${stageOf(t.status)}</span>
-            <span class=\"${statusClass(t.status)}\">${t.status}</span>
             <span>p${t.priority}/i${t.impact}/e${t.effort}</span>
             <span>${t.assigned_agent || '-'}</span>
           </div>
@@ -405,6 +394,7 @@ INDEX_HTML = """<!doctype html>
         <div class=\"detail-title\">${t.title}</div>
         <div class=\"sub\">source: ${t.source || '-'} ${t.external_id || ''}</div>
         <div class=\"sub\">flow stage: <strong>${stageOf(t.status)}</strong></div>
+        <div class=\"sub\">internal status: <strong>${t.status}</strong></div>
         ${t.pr_url ? `<div class=\"sub\">PR: <a href=\"${t.pr_url}\" target=\"_blank\">${t.pr_url}</a></div>` : ''}
         <div class=\"detail-grid\">
           <div class=\"stat\"><div class=\"k\">Priority</div><div class=\"v\">${t.priority}</div></div>
