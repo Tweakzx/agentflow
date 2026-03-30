@@ -15,6 +15,7 @@ A DB-first task and issue management system designed for multiple coding agents.
 - Markdown export per project
 - Lightweight HTML dashboard generation
 - Multi-agent safe claiming with lease/heartbeat/release
+- Adapter protocol for integrating multiple coding agents
 
 ## Quick Start
 
@@ -31,13 +32,16 @@ agentflow claim-next --project kthena --agent codex-worker-1
 agentflow heartbeat 1 --agent codex-worker-1 --lease-minutes 30
 agentflow workers --project kthena
 agentflow release 1 --agent codex-worker-1 --to-status approved
+agentflow adapters
+agentflow run-once --project kthena --adapter mock --agent codex-worker-1
+agentflow run-batch --project kthena --adapter mock --agent-prefix worker --count 3
 agentflow board --project kthena
 agentflow dashboard --db ./data/agentflow.db --out ./dashboard.html
 ```
 
 ## Multi-Agent Integration
 
-This repository provides the core engine and CLI. Thin adapters can map high-level commands for OpenClaw, Codex, Claude Code, or other coding agents:
+This repository provides the core engine and CLI. Thin adapters map high-level commands for OpenClaw, Codex, Claude Code, or other coding agents:
 
 - `pm init`
 - `pm scan`
@@ -45,6 +49,15 @@ This repository provides the core engine and CLI. Thin adapters can map high-lev
 - `pm board`
 - `pm sync`
 - `pm report`
+
+## Adapter Contract
+
+An adapter implements a normalized interface:
+
+- input: `Task + agent_name`
+- output: `AdapterResult(success, note, to_status)`
+
+This keeps AgentFlow focused on queueing and lifecycle management while each adapter handles provider-specific execution.
 
 ## Status Values
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .adapters.registry import AdapterRegistry
 from .reports import build_dashboard_html, export_markdown
+from .services.runner import Runner
 from .store import Store
 
 
@@ -69,6 +71,21 @@ def _parser() -> argparse.ArgumentParser:
     p_dashboard = sub.add_parser("dashboard", help="Generate HTML dashboard")
     p_dashboard.add_argument("--out", default="./dashboard.html")
 
+    sub.add_parser("adapters", help="List registered adapters")
+
+    p_run_once = sub.add_parser("run-once", help="Claim and run one task through an adapter")
+    p_run_once.add_argument("--project", required=True)
+    p_run_once.add_argument("--adapter", default="mock")
+    p_run_once.add_argument("--agent", required=True)
+    p_run_once.add_argument("--lease-minutes", type=int, default=30)
+
+    p_run_batch = sub.add_parser("run-batch", help="Run multiple sequential claims with generated agent names")
+    p_run_batch.add_argument("--project", required=True)
+    p_run_batch.add_argument("--adapter", default="mock")
+    p_run_batch.add_argument("--agent-prefix", default="worker")
+    p_run_batch.add_argument("--count", type=int, default=3)
+    p_run_batch.add_argument("--lease-minutes", type=int, default=30)
+
     return parser
 
 
@@ -90,6 +107,8 @@ def main() -> None:
     parser = _parser()
     args = parser.parse_args()
     store = Store(args.db)
+    registry = AdapterRegistry()
+    runner = Runner(store, registry)
 
     if args.command == "init":
         with store.connect():
@@ -174,6 +193,37 @@ def main() -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(html, encoding="utf-8")
         print(f"dashboard written: {out_path}")
+        return
+
+    if args.command == "adapters":
+        for name in registry.names():
+            print(name)
+        return
+
+    if args.command == "run-once":
+        record = runner.run_once(args.project, args.adapter, args.agent, lease_minutes=args.lease_minutes)
+        if record.task is None:
+            print(record.message)
+            return
+        _print_tasks([record.task])
+        print(record.message)
+        return
+
+    if args.command == "run-batch":
+        records = runner.run_batch(
+            args.project,
+            args.adapter,
+            args.agent_prefix,
+            args.count,
+            lease_minutes=args.lease_minutes,
+        )
+        tasks = [r.task for r in records if r.task is not None]
+        if tasks:
+            _print_tasks(tasks)
+        else:
+            print("(no tasks)")
+        for r in records:
+            print(r.message)
         return
 
 
