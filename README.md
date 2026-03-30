@@ -84,6 +84,7 @@ Current console capabilities:
 - Task center list with search and status filter
 - Stage/source filter for issue collection and process routing
 - Stage board as top-level workflow view (supports drag-and-drop stage transition)
+- Semantic color coding for stage/status badges and board columns (improved readability)
 - Recent run stream with adapter/agent timeline
 - Task detail pane redesigned: concise flow info + PR detail panel + related links
 - Manual task flow transition (`pending/approved/in_progress/pr_ready/...`) with notes and optional force

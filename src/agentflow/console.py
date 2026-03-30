@@ -32,6 +32,12 @@ INDEX_HTML = """<!doctype html>
       --accent: #007a6e;
       --warn: #c04848;
       --ok: #2a7b3f;
+      --c-collected: #2563eb;
+      --c-triaged: #7c3aed;
+      --c-executing: #0f766e;
+      --c-review: #b45309;
+      --c-done: #15803d;
+      --c-blocked: #b91c1c;
     }
     * { box-sizing: border-box; }
     body {
@@ -85,6 +91,28 @@ INDEX_HTML = """<!doctype html>
     .detail { position: relative; }
     .detail-content { padding: 14px; }
     .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+    .badge-chip {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      font-weight: 600;
+    }
+    .stage-collected { background: #e8f0ff; color: var(--c-collected); border-color: #bfd4ff; }
+    .stage-triaged { background: #efe9ff; color: var(--c-triaged); border-color: #d8c8ff; }
+    .stage-executing { background: #e4f7f4; color: var(--c-executing); border-color: #b5ece4; }
+    .stage-review { background: #fff4e6; color: var(--c-review); border-color: #ffdcb1; }
+    .stage-done { background: #e7f8ea; color: var(--c-done); border-color: #bdeec7; }
+    .stage-blocked { background: #ffe8e8; color: var(--c-blocked); border-color: #ffc2c2; }
+    .status-pending, .status-approved, .status-in-progress, .status-pr-ready, .status-pr-open, .status-merged, .status-skipped, .status-blocked {
+      font-weight: 600;
+    }
+    .status-pending { color: var(--c-collected); }
+    .status-approved { color: var(--c-triaged); }
+    .status-in-progress { color: var(--c-executing); }
+    .status-pr-ready, .status-pr-open { color: var(--c-review); }
+    .status-merged, .status-skipped { color: var(--c-done); }
+    .status-blocked { color: var(--c-blocked); }
     .detail-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .detail-title { font-size: 20px; font-weight: 700; margin: 8px 0 4px; }
     .detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; margin-top: 10px; }
@@ -105,6 +133,8 @@ INDEX_HTML = """<!doctype html>
     button.secondary { background: #4b6686; }
     .history { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
     .timeline-item { font-size: 13px; padding: 7px 0; border-bottom: 1px dashed #edf2f7; }
+    a { color: #0b63c7; text-decoration: none; }
+    a:hover { text-decoration: underline; }
     .err { color: var(--warn); font-weight: 600; }
     .ok { color: var(--ok); font-weight: 600; }
     .board-wrap {
@@ -125,6 +155,12 @@ INDEX_HTML = """<!doctype html>
       border-bottom: 1px solid var(--line);
       font-size: 13px;
     }
+    .col.stage-collected h4 { background: #e8f0ff; }
+    .col.stage-triaged h4 { background: #efe9ff; }
+    .col.stage-executing h4 { background: #e4f7f4; }
+    .col.stage-review h4 { background: #fff4e6; }
+    .col.stage-done h4 { background: #e7f8ea; }
+    .col.stage-blocked h4 { background: #ffe8e8; }
     .chip {
       margin: 8px;
       border: 1px solid var(--line);
@@ -230,7 +266,13 @@ INDEX_HTML = """<!doctype html>
       return await res.json();
     }
 
-    function statusClass(status) { return status === 'blocked' ? 'err' : ''; }
+    function statusClass(status) {
+      return `status-${String(status || 'unknown').replaceAll('_', '-')}`;
+    }
+
+    function stageClass(stage) {
+      return `stage-${String(stage || 'other')}`;
+    }
 
     function stageOf(status) {
       if (status === 'pending') return 'collected';
@@ -312,7 +354,7 @@ INDEX_HTML = """<!doctype html>
         <div class=\"task ${state.selectedTask && state.selectedTask.id === t.id ? 'active' : ''}\" onclick=\"openTask(${t.id})\">
           <div class=\"task-title\">#${t.id} ${t.title}</div>
           <div class=\"meta\">
-            <span>${stageOf(t.status)}</span>
+            <span class=\"badge-chip ${stageClass(stageOf(t.status))}\">${stageOf(t.status)}</span>
             <span>p${t.priority}/i${t.impact}/e${t.effort}</span>
             <span>${t.assigned_agent || '-'}</span>
           </div>
@@ -327,7 +369,7 @@ INDEX_HTML = """<!doctype html>
         const items = tasks.map(
           t => `<div class=\"chip\" draggable=\"true\" ondragstart=\"dragTask(event, ${t.id})\" onclick=\"openTask(${t.id})\">#${t.id} ${t.title}<div class=\"sub\">${t.status}</div></div>`
         ).join('') || '<div class=\"sub\" style=\"padding:10px\">(empty)</div>';
-        return `<section class=\"col\" ondragover=\"allowDrop(event)\" ondrop=\"dropToStage(event, '${st}')\"><h4>${st} (${tasks.length})</h4>${items}</section>`;
+        return `<section class=\"col ${stageClass(st)}\" ondragover=\"allowDrop(event)\" ondrop=\"dropToStage(event, '${st}')\"><h4>${st} (${tasks.length})</h4>${items}</section>`;
       }).join('');
     }
 
@@ -340,7 +382,7 @@ INDEX_HTML = """<!doctype html>
       root.innerHTML = state.recentRuns.map(r => `
         <div class=\"run-item\">
           <div><strong>#${r.id}</strong> task #${r.task_id} ${r.task_title || ''}</div>
-          <div class=\"meta\"><span>${r.status}</span><span>${r.adapter}</span><span>${r.agent_name}</span><span>${r.started_at}</span></div>
+          <div class=\"meta\"><span class=\"${statusClass(r.status)}\">${r.status}</span><span>${r.adapter}</span><span>${r.agent_name}</span><span>${r.started_at}</span></div>
         </div>
       `).join('');
     }
@@ -354,7 +396,7 @@ INDEX_HTML = """<!doctype html>
       root.innerHTML = state.audit.map(e => `
         <div class=\"run-item\">
           <div><strong>#${e.task_id}</strong> ${e.task_title || ''}</div>
-          <div class=\"meta\"><span>${e.from_status || '-'}</span><span>-></span><span>${e.to_status}</span><span>${e.changed_at}</span></div>
+          <div class=\"meta\"><span class=\"${statusClass(e.from_status || '')}\">${e.from_status || '-'}</span><span>-></span><span class=\"${statusClass(e.to_status || '')}\">${e.to_status}</span><span>${e.changed_at}</span></div>
           <div class=\"sub\">${e.note || '-'}</div>
         </div>
       `).join('');
@@ -398,8 +440,8 @@ INDEX_HTML = """<!doctype html>
       detail.innerHTML = `
         <div class=\"detail-top\">
           <span class=\"badge\">task #${t.id}</span>
-          <span class=\"badge\">${stageOf(t.status)}</span>
-          <span class=\"badge ${statusClass(t.status)}\">status: ${t.status}</span>
+          <span class=\"badge-chip ${stageClass(stageOf(t.status))}\">${stageOf(t.status)}</span>
+          <span class=\"badge-chip ${statusClass(t.status)}\">status: ${t.status}</span>
         </div>
         <div class=\"detail-title\">${t.title}</div>
         <div class=\"sub\">source: ${t.source || '-'} ${t.external_id || ''} · agent: ${t.assigned_agent || '-'} · lease: ${t.lease_until || '-'}</div>
