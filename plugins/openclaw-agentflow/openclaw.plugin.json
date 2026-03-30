@@ -1,0 +1,34 @@
+{
+  "id": "agentflow",
+  "name": "AgentFlow",
+  "version": "0.1.0",
+  "description": "Task control-plane bridge: scheduled discovery + webhook comment execution + run observability.",
+  "kind": "non-capability",
+  "entry": "./index.ts",
+  "configSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "description": "SQLite database path for AgentFlow",
+        "default": "./data/agentflow.db"
+      },
+      "defaultProject": {
+        "type": "string",
+        "description": "Default project name when command payload omits project"
+      },
+      "defaultAdapter": {
+        "type": "string",
+        "description": "Adapter used for event-driven run execution",
+        "default": "mock"
+      },
+      "defaultAgentName": {
+        "type": "string",
+        "description": "Agent identity attached to run records",
+        "default": "openclaw-agent"
+      }
+    },
+    "required": ["dbPath"]
+  }
+}

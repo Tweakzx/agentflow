@@ -1,0 +1,7 @@
+{
+  "id": "agentflow",
+  "name": "AgentFlow",
+  "version": "0.1.0",
+  "description": "Cursor-compatible bundle metadata for AgentFlow workflows.",
+  "entry": "skills/agentflow/SKILL.md"
+}

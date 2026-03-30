@@ -1,0 +1,17 @@
+{
+  "id": "agentflow",
+  "name": "AgentFlow",
+  "version": "0.1.0",
+  "description": "Codex bundle for AgentFlow task control-plane commands.",
+  "entry": "skills/agentflow/SKILL.md",
+  "commands": [
+    {
+      "name": "agentflow.run",
+      "description": "Run one task via AgentFlow"
+    },
+    {
+      "name": "agentflow.status",
+      "description": "Read task board status"
+    }
+  ]
+}

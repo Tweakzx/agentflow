@@ -1,0 +1,20 @@
+{
+  "name": "@tweakzx/openclaw-agentflow",
+  "version": "0.1.0",
+  "description": "OpenClaw native plugin bridge for AgentFlow control-plane workflows",
+  "type": "module",
+  "main": "index.ts",
+  "files": [
+    "index.ts",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "agentflow",
+    "control-plane",
+    "automation"
+  ],
+  "license": "MIT"
+}

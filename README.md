@@ -115,6 +115,65 @@ cd /home/shawn/github/agentflow
 PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
+## Plugin Packaging
+
+This repository now includes plugin skeletons:
+
+- OpenClaw native plugin: `plugins/openclaw-agentflow/`
+- Codex bundle sample: `plugins/bundles/codex/`
+- Claude bundle sample: `plugins/bundles/claude/`
+- Cursor bundle sample: `plugins/bundles/cursor/`
+
+### OpenClaw Native Plugin (local install)
+
+```bash
+openclaw plugins install ./plugins/openclaw-agentflow
+openclaw plugins enable agentflow
+openclaw gateway restart
+```
+
+Then configure under `plugins.entries.agentflow.config`, for example:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "agentflow": {
+        "enabled": true,
+        "config": {
+          "dbPath": "./data/agentflow.db",
+          "defaultProject": "kthena",
+          "defaultAdapter": "mock",
+          "defaultAgentName": "openclaw-agent"
+        }
+      }
+    }
+  }
+}
+```
+
+Exposed by the native plugin:
+
+- Command: `agentflow.run`
+- Tool: `agentflow_status`
+- HTTP route: `POST /agentflow/webhook/comment`
+
+### Publish to OpenClaw ecosystem
+
+1. Publish `plugins/openclaw-agentflow` as npm package (for example `@tweakzx/openclaw-agentflow`).
+2. Ensure package includes `openclaw.plugin.json`, `index.ts`, and README.
+3. Submit to OpenClaw Community/Marketplace listing after npm release.
+
+### Bundle compatibility for other agents
+
+Bundle manifests are provided as templates:
+
+- `.codex-plugin/plugin.json`
+- `.claude-plugin/plugin.json`
+- `.cursor-plugin/plugin.json`
+
+You can package each folder independently if you want dedicated distribution channels for different agent ecosystems.
+
 ## Multi-Agent Integration
 
 This repository provides the core engine and CLI. Thin adapters map high-level commands for OpenClaw, Codex, Claude Code, or other coding agents:
