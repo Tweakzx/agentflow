@@ -9,6 +9,7 @@ A DB-first task and issue management system designed for multiple coding agents.
 ## Features (MVP)
 
 - SQLite storage (`projects`, `tasks`, `status_history`, `links`)
+- Run ledger (`runs`, `run_steps`, `triggers`, `gate_profiles`)
 - Task lifecycle management with explicit statuses
 - Priority scoring + `next` recommendation
 - Board and stats views in terminal
@@ -16,6 +17,9 @@ A DB-first task and issue management system designed for multiple coding agents.
 - Lightweight HTML dashboard generation
 - Multi-agent safe claiming with lease/heartbeat/release
 - Adapter protocol for integrating multiple coding agents
+- Trigger idempotency (`idempotency_key`) to prevent duplicate runs
+- Scheduled issue discovery + webhook-style comment execution
+- Project gate evaluation and gate-enforced status transitions
 
 ## Quick Start
 
@@ -43,6 +47,72 @@ agentflow discover-issues --project kthena --from-file ./examples/issues.json
 agentflow handle-comment --project kthena --payload-file ./examples/comment.json --adapter mock --agent codex-webhook
 agentflow board --project kthena
 agentflow dashboard --db ./data/agentflow.db --out ./dashboard.html
+```
+
+## Implemented Now
+
+- `run-once` / `run-batch` execution orchestration
+- Run inspection: `runs`, `run-steps`
+- Trigger inspection: `triggers`
+- Gate inspection: `gate-profile`
+- Scheduled discovery ingestion: `discover-issues`
+- Comment-event execution ingestion: `handle-comment`
+
+## Event-Driven Workflow (Current CLI Form)
+
+The current implementation accepts event payload files so you can wire cron/webhooks externally and forward JSON into AgentFlow.
+
+### 1. Scheduled Discovery Payload
+
+`issues.json` example:
+
+```json
+[
+  { "number": 841, "title": "controller partition revision bug", "priority": 5, "impact": 5, "effort": 2 },
+  { "number": 838, "title": "partition percentage support", "priority": 4, "impact": 4, "effort": 3 }
+]
+```
+
+Ingest:
+
+```bash
+agentflow discover-issues --project kthena --from-file ./issues.json
+```
+
+### 2. Comment Trigger Payload
+
+`comment.json` example:
+
+```json
+{
+  "comment": { "id": 5001, "body": "/agentflow run" },
+  "issue": { "number": 841, "title": "controller partition revision bug" }
+}
+```
+
+Handle:
+
+```bash
+agentflow handle-comment --project kthena --payload-file ./comment.json --adapter mock --agent codex-webhook
+```
+
+## Gate Profiles
+
+Gate profile storage is implemented in `gate_profiles` and enforced by `Runner` when commands are configured for a project.
+
+Current inspection command:
+
+```bash
+agentflow gate-profile --project kthena
+```
+
+## Testing
+
+Run all tests:
+
+```bash
+cd /home/shawn/github/agentflow
+PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 ## Multi-Agent Integration
