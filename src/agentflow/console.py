@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -385,24 +386,36 @@ INDEX_HTML = """<!doctype html>
 
     function renderDetail(data) {
       const t = data.task;
+      const links = data.links || {};
+      const pr = data.pr_summary || {};
+      const issueUrl = links.issue_url || '';
+      const prUrl = links.pr_url || '';
+      const repo = links.repo || '';
+      const prCandidates = links.pr_candidates || [];
+      const latestRuns = (data.runs || []).slice(0, 5);
+      const historyRows = (data.history || []).slice(0, 12);
       const detail = document.getElementById('detail');
       detail.innerHTML = `
         <div class=\"detail-top\">
           <span class=\"badge\">task #${t.id}</span>
-          <span class=\"badge ${statusClass(t.status)}\">${t.status}</span>
+          <span class=\"badge\">${stageOf(t.status)}</span>
+          <span class=\"badge ${statusClass(t.status)}\">status: ${t.status}</span>
         </div>
         <div class=\"detail-title\">${t.title}</div>
-        <div class=\"sub\">source: ${t.source || '-'} ${t.external_id || ''}</div>
-        <div class=\"sub\">flow stage: <strong>${stageOf(t.status)}</strong></div>
-        <div class=\"sub\">internal status: <strong>${t.status}</strong></div>
-        ${t.pr_url ? `<div class=\"sub\">PR: <a href=\"${t.pr_url}\" target=\"_blank\">${t.pr_url}</a></div>` : ''}
+        <div class=\"sub\">source: ${t.source || '-'} ${t.external_id || ''} · agent: ${t.assigned_agent || '-'} · lease: ${t.lease_until || '-'}</div>
         <div class=\"detail-grid\">
-          <div class=\"stat\"><div class=\"k\">Priority</div><div class=\"v\">${t.priority}</div></div>
-          <div class=\"stat\"><div class=\"k\">Impact</div><div class=\"v\">${t.impact}</div></div>
-          <div class=\"stat\"><div class=\"k\">Effort</div><div class=\"v\">${t.effort}</div></div>
-          <div class=\"stat\"><div class=\"k\">Agent</div><div class=\"v\">${t.assigned_agent || '-'}</div></div>
-          <div class=\"stat\"><div class=\"k\">Lease</div><div class=\"v\">${t.lease_until || '-'}</div></div>
-          <div class=\"stat\"><div class=\"k\">Runs</div><div class=\"v\">${data.runs.length}</div></div>
+          <div class=\"stat\"><div class=\"k\">Priority / Impact / Effort</div><div class=\"v\">${t.priority} / ${t.impact} / ${t.effort}</div></div>
+          <div class=\"stat\"><div class=\"k\">Runs</div><div class=\"v\">${pr.run_count || 0}</div></div>
+          <div class=\"stat\"><div class=\"k\">Latest Gate</div><div class=\"v\">${pr.latest_gate_passed === null || pr.latest_gate_passed === undefined ? '-' : (pr.latest_gate_passed ? 'pass' : 'fail')}</div></div>
+        </div>
+        <div class=\"history\">
+          <h4 style=\"margin:0 0 8px\">PR Detail</h4>
+          <div class=\"timeline-item\">PR summary: ${pr.latest_result_summary || 'No execution summary yet'}</div>
+          <div class=\"timeline-item\">Latest run status: ${pr.latest_run_status || '-'}</div>
+          <div class=\"timeline-item\">Repo: ${repo ? `<a href=\"https://github.com/${repo}\" target=\"_blank\">${repo}</a>` : '-'}</div>
+          <div class=\"timeline-item\">Issue: ${issueUrl ? `<a href=\"${issueUrl}\" target=\"_blank\">${issueUrl}</a>` : '-'}</div>
+          <div class=\"timeline-item\">Primary PR: ${prUrl ? `<a href=\"${prUrl}\" target=\"_blank\">${prUrl}</a>` : '-'}</div>
+          <div class=\"timeline-item\">Related PR Links: ${prCandidates.length ? prCandidates.map(u => `<a href=\"${u}\" target=\"_blank\">${u}</a>`).join('<br/>') : '-'}</div>
         </div>
         <div class=\"detail-actions\">
           <select id=\"adapterSel\"><option value=\"mock\">mock</option></select>
@@ -425,12 +438,12 @@ INDEX_HTML = """<!doctype html>
           <button class=\"secondary\" onclick=\"moveTask(${t.id}, null, null, null)\">Update Flow</button>
         </div>
         <div class=\"history\">
-          <h4 style=\"margin:0 0 8px\">Status History</h4>
-          ${(data.history || []).map(h => `<div class=\"timeline-item\">${h.changed_at}: ${h.from_status || '-'} -> ${h.to_status} ${h.note ? `| ${h.note}` : ''}</div>`).join('') || '<div class=\"sub\">No history</div>'}
+          <h4 style=\"margin:0 0 8px\">Flow History</h4>
+          ${historyRows.map(h => `<div class=\"timeline-item\">${h.changed_at}: ${h.from_status || '-'} -> ${h.to_status} ${h.note ? `| ${h.note}` : ''}</div>`).join('') || '<div class=\"sub\">No history</div>'}
         </div>
         <div class=\"history\">
-          <h4 style=\"margin:0 0 8px\">Run Timeline</h4>
-          ${(data.runs || []).map(r => `
+          <h4 style=\"margin:0 0 8px\">Recent Runs (Top 5)</h4>
+          ${latestRuns.map(r => `
             <div class=\"timeline-item\">
               <span class=\"${r.status === 'failed' ? 'err' : 'ok'}\">run #${r.id} ${r.status}</span>
               <div class=\"sub\">${r.trigger_type} | ${r.adapter} | ${r.agent_name} | gate=${r.gate_passed ? 'pass' : 'fail'}</div>
@@ -547,6 +560,44 @@ def _flow_stage_for_status(status: str) -> str:
         "blocked": "blocked",
     }
     return mapping.get(status, "other")
+
+
+def _extract_pr_links(runs: list[dict[str, Any]]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    pat = re.compile(r"https://github\.com/[^\s]+/pull/\d+")
+    for run in runs:
+        texts: list[str] = []
+        result_summary = run.get("result_summary")
+        if isinstance(result_summary, str):
+            texts.append(result_summary)
+        for step in run.get("steps", []):
+            excerpt = step.get("log_excerpt")
+            if isinstance(excerpt, str):
+                texts.append(excerpt)
+        for text in texts:
+            for match in pat.findall(text):
+                if match not in seen:
+                    seen.add(match)
+                    out.append(match)
+    return out
+
+
+def _build_task_links(task: dict[str, Any], repo_full_name: str | None, runs: list[dict[str, Any]]) -> dict[str, Any]:
+    source = str(task.get("source") or "")
+    external_id = str(task.get("external_id") or "")
+    task_pr = str(task.get("pr_url") or "").strip() or None
+    issue_url = None
+    if source == "github" and repo_full_name and external_id:
+        issue_url = f"https://github.com/{repo_full_name}/issues/{external_id}"
+    run_prs = _extract_pr_links(runs)
+    pr_url = task_pr or (run_prs[0] if run_prs else None)
+    return {
+        "repo": repo_full_name,
+        "issue_url": issue_url,
+        "pr_url": pr_url,
+        "pr_candidates": run_prs,
+    }
 
 
 def _validate_manual_transition(from_status: str, to_status: str) -> str | None:
@@ -696,7 +747,25 @@ def _build_handler(
                     for run in runs:
                         run["steps"] = [_row_to_dict(s) for s in store.list_run_steps(int(run["id"]))]
                     history = [_row_to_dict(h) for h in store.list_status_history(task_id)]
-                    self._send_json({"task": _task_to_dict(task), "runs": runs, "history": history})
+                    task_dict = _task_to_dict(task)
+                    repo = store.get_project_repo(task.project)
+                    latest_run = runs[0] if runs else None
+                    links = _build_task_links(task_dict, repo, runs)
+                    pr_summary = {
+                        "latest_run_status": latest_run["status"] if latest_run else None,
+                        "latest_gate_passed": bool(latest_run["gate_passed"]) if latest_run else None,
+                        "latest_result_summary": latest_run["result_summary"] if latest_run else None,
+                        "run_count": len(runs),
+                    }
+                    self._send_json(
+                        {
+                            "task": task_dict,
+                            "runs": runs,
+                            "history": history,
+                            "links": links,
+                            "pr_summary": pr_summary,
+                        }
+                    )
                     return
 
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)

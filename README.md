@@ -85,7 +85,7 @@ Current console capabilities:
 - Stage/source filter for issue collection and process routing
 - Stage board as top-level workflow view (supports drag-and-drop stage transition)
 - Recent run stream with adapter/agent timeline
-- Task detail pane with history and run steps
+- Task detail pane redesigned: concise flow info + PR detail panel + related links
 - Manual task flow transition (`pending/approved/in_progress/pr_ready/...`) with notes and optional force
 - Audit trail panel for all manual/automatic status transitions
 - One-click task execution (`POST /api/task/{id}/run`) for adapter-triggered run

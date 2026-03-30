@@ -622,3 +622,10 @@ class Store:
             rows = conn.execute("SELECT name FROM projects ORDER BY name").fetchall()
             for row in rows:
                 yield str(row["name"])
+
+    def get_project_repo(self, project: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT repo_full_name FROM projects WHERE name = ?", (project,)).fetchone()
+            if row is None:
+                return None
+            return str(row["repo_full_name"]) if row["repo_full_name"] else None
