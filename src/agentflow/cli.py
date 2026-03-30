@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .adapters.registry import AdapterRegistry
 from .reports import build_dashboard_html, export_markdown
+from .services.discovery import IssueDiscoveryService
 from .services.runner import Runner
+from .services.webhook import GithubCommentWebhookService
 from .store import Store
 
 
@@ -98,6 +101,16 @@ def _parser() -> argparse.ArgumentParser:
     p_run_batch.add_argument("--count", type=int, default=3)
     p_run_batch.add_argument("--lease-minutes", type=int, default=30)
 
+    p_discovery = sub.add_parser("discover-issues", help="Ingest scheduled issue discovery payload")
+    p_discovery.add_argument("--project", required=True)
+    p_discovery.add_argument("--from-file", required=True, dest="from_file")
+
+    p_comment = sub.add_parser("handle-comment", help="Handle GitHub PR/issue comment webhook payload")
+    p_comment.add_argument("--project", required=True)
+    p_comment.add_argument("--payload-file", required=True)
+    p_comment.add_argument("--adapter", default="mock")
+    p_comment.add_argument("--agent", required=True)
+
     return parser
 
 
@@ -121,6 +134,8 @@ def main() -> None:
     store = Store(args.db)
     registry = AdapterRegistry()
     runner = Runner(store, registry)
+    discovery = IssueDiscoveryService(store)
+    webhook = GithubCommentWebhookService(store, runner)
 
     if args.command == "init":
         with store.connect():
@@ -283,6 +298,30 @@ def main() -> None:
             print("(no tasks)")
         for r in records:
             print(r.message)
+        return
+
+    if args.command == "discover-issues":
+        payload = json.loads(Path(args.from_file).read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise ValueError("discover-issues payload must be a JSON array")
+        result = discovery.ingest_issues(args.project, payload)
+        print(f"created={result.created} skipped={result.skipped}")
+        return
+
+    if args.command == "handle-comment":
+        payload = json.loads(Path(args.payload_file).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("handle-comment payload must be a JSON object")
+        result = webhook.handle_pr_comment(
+            project=args.project,
+            payload=payload,
+            adapter=args.adapter,
+            agent_name=args.agent,
+        )
+        print(
+            f"accepted={result.accepted} duplicate={result.duplicate} "
+            f"run_success={result.run_success} message={result.message}"
+        )
         return
 
 

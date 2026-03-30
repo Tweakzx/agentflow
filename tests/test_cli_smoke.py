@@ -86,6 +86,34 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIn("k-cli-1", trig_out)
         self.assertIn("required_checks=['unit']", gate_out)
 
+    def test_discovery_and_comment_commands(self) -> None:
+        issues_file = Path(self.tempdir.name) / "issues.json"
+        issues_file.write_text(
+            '[{"number": 555, "title": "new issue from schedule", "priority": 4, "impact": 4, "effort": 2}]',
+            encoding="utf-8",
+        )
+        comment_file = Path(self.tempdir.name) / "comment.json"
+        comment_file.write_text(
+            '{"comment":{"id":9009,"body":"/agentflow run"},"issue":{"number":555,"title":"new issue from schedule"}}',
+            encoding="utf-8",
+        )
+
+        disc_out = self._run_cli("discover-issues", "--project", "demo", "--from-file", str(issues_file))
+        webhook_out = self._run_cli(
+            "handle-comment",
+            "--project",
+            "demo",
+            "--payload-file",
+            str(comment_file),
+            "--adapter",
+            "mock",
+            "--agent",
+            "codex-webhook",
+        )
+
+        self.assertIn("created=1", disc_out)
+        self.assertIn("accepted=True", webhook_out)
+
 
 if __name__ == "__main__":
     unittest.main()

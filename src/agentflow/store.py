@@ -366,6 +366,17 @@ class Store:
             rows = conn.execute(sql, args).fetchall()
             return [Task(**dict(row)) for row in rows]
 
+    def get_task_by_external(self, project: str, source: str, external_id: str) -> Task | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                self._base_task_sql()
+                + " WHERE p.name = ? AND t.source = ? AND t.external_id = ? ORDER BY t.id DESC LIMIT 1",
+                (project, source, external_id),
+            ).fetchone()
+            if row is None:
+                return None
+            return Task(**dict(row))
+
     def next_tasks(self, project: str, limit: int = 5) -> list[Task]:
         tasks = [t for t in self.list_tasks(project) if t.status in ACTIVE_STATUSES]
         tasks.sort(key=lambda t: (t.score, t.priority, t.impact), reverse=True)
@@ -396,6 +407,46 @@ class Store:
                 return None
 
             task_id = int(row["id"])
+            from_status = str(row["status"])
+            conn.execute(
+                """
+                UPDATE tasks
+                SET status = 'in_progress',
+                    assigned_agent = ?,
+                    lease_until = datetime('now', ?),
+                    updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (agent, f"+{lease_minutes} minutes", task_id),
+            )
+            conn.execute(
+                "INSERT INTO status_history(task_id, from_status, to_status, note) VALUES(?, ?, ?, ?)",
+                (task_id, from_status, "in_progress", f"claimed by {agent}"),
+            )
+            task = conn.execute(self._base_task_sql() + " WHERE t.id = ?", (task_id,)).fetchone()
+            conn.commit()
+            return Task(**dict(task)) if task else None
+
+    def claim_task(self, task_id: int, project: str, agent: str, lease_minutes: int = 30) -> Task | None:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT t.id, t.status
+                FROM tasks t
+                JOIN projects p ON p.id = t.project_id
+                WHERE t.id = ?
+                  AND p.name = ?
+                  AND t.status IN ('pending', 'approved')
+                  AND (t.lease_until IS NULL OR t.lease_until < datetime('now'))
+                LIMIT 1
+                """,
+                (task_id, project),
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return None
+
             from_status = str(row["status"])
             conn.execute(
                 """

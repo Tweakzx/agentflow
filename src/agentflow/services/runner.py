@@ -26,6 +26,23 @@ class Runner:
         if task is None:
             return RunRecord(task=None, adapter=adapter_name, success=False, message="no claimable task")
 
+        return self._run_claimed_task(project, task, adapter_name, agent_name)
+
+    def run_task(
+        self,
+        project: str,
+        task_id: int,
+        adapter_name: str,
+        agent_name: str,
+        lease_minutes: int = 30,
+    ) -> RunRecord:
+        task = self.store.claim_task(task_id, project, agent_name, lease_minutes=lease_minutes)
+        if task is None:
+            return RunRecord(task=None, adapter=adapter_name, success=False, message="task not claimable")
+
+        return self._run_claimed_task(project, task, adapter_name, agent_name)
+
+    def _run_claimed_task(self, project: str, task: Task, adapter_name: str, agent_name: str) -> RunRecord:
         run_id = self.store.create_run(
             task_id=task.id,
             project=project,

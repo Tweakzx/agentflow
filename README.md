@@ -39,6 +39,8 @@ agentflow runs --task-id 1
 agentflow run-steps 1
 agentflow triggers --project kthena
 agentflow gate-profile --project kthena
+agentflow discover-issues --project kthena --from-file ./examples/issues.json
+agentflow handle-comment --project kthena --payload-file ./examples/comment.json --adapter mock --agent codex-webhook
 agentflow board --project kthena
 agentflow dashboard --db ./data/agentflow.db --out ./dashboard.html
 ```
