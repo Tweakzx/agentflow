@@ -61,6 +61,12 @@ class Store:
                 (name, repo_full_name),
             )
 
+    def _project_id(self, conn: sqlite3.Connection, project: str) -> int:
+        row = conn.execute("SELECT id FROM projects WHERE name = ?", (project,)).fetchone()
+        if row is None:
+            raise ValueError(f"Project '{project}' not found")
+        return int(row["id"])
+
     def add_task(
         self,
         *,
@@ -74,15 +80,13 @@ class Store:
         external_id: str | None,
     ) -> int:
         with self.connect() as conn:
-            row = conn.execute("SELECT id FROM projects WHERE name = ?", (project,)).fetchone()
-            if row is None:
-                raise ValueError(f"Project '{project}' not found")
+            project_id = self._project_id(conn, project)
             cur = conn.execute(
                 """
                 INSERT INTO tasks(project_id, title, description, priority, impact, effort, source, external_id)
                 VALUES(?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (row["id"], title, description, priority, impact, effort, source, external_id),
+                (project_id, title, description, priority, impact, effort, source, external_id),
             )
             task_id = int(cur.lastrowid)
             conn.execute(
@@ -90,6 +94,160 @@ class Store:
                 (task_id, None, "pending", "task created"),
             )
             return task_id
+
+    def create_run(
+        self,
+        *,
+        task_id: int,
+        project: str,
+        trigger_type: str,
+        trigger_ref: str,
+        adapter: str,
+        agent_name: str,
+        idempotency_key: str,
+        workspace_ref: str | None = None,
+    ) -> int:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            task_row = conn.execute(
+                """
+                SELECT t.id
+                FROM tasks t
+                JOIN projects p ON p.id = t.project_id
+                WHERE t.id = ? AND p.id = ?
+                """,
+                (task_id, project_id),
+            ).fetchone()
+            if task_row is None:
+                raise ValueError(f"Task {task_id} not found in project '{project}'")
+
+            cur = conn.execute(
+                """
+                INSERT INTO runs(
+                    task_id, project_id, trigger_type, trigger_ref, adapter, agent_name,
+                    workspace_ref, status, idempotency_key
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, 'running', ?)
+                """,
+                (
+                    task_id,
+                    project_id,
+                    trigger_type,
+                    trigger_ref,
+                    adapter,
+                    agent_name,
+                    workspace_ref,
+                    idempotency_key,
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def append_run_step(
+        self,
+        run_id: int,
+        step_name: str,
+        status: str,
+        log_excerpt: str | None = None,
+        error_code: str | None = None,
+    ) -> int:
+        with self.connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO run_steps(run_id, step_name, status, log_excerpt, error_code)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (run_id, step_name, status, log_excerpt, error_code),
+            )
+            return int(cur.lastrowid)
+
+    def finalize_run(
+        self,
+        run_id: int,
+        status: str,
+        *,
+        gate_passed: bool,
+        result_summary: str | None = None,
+        error_code: str | None = None,
+        error_detail: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET status = ?,
+                    gate_passed = ?,
+                    result_summary = ?,
+                    error_code = ?,
+                    error_detail = ?,
+                    finished_at = datetime('now')
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    1 if gate_passed else 0,
+                    result_summary,
+                    error_code,
+                    error_detail,
+                    run_id,
+                ),
+            )
+
+    def list_runs(self, task_id: int) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, task_id, project_id, trigger_type, trigger_ref, adapter, agent_name,
+                       workspace_ref, status, gate_passed, result_summary, error_code, error_detail,
+                       idempotency_key, started_at, finished_at
+                FROM runs
+                WHERE task_id = ?
+                ORDER BY id DESC
+                """,
+                (task_id,),
+            ).fetchall()
+            return list(rows)
+
+    def list_run_steps(self, run_id: int) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, run_id, step_name, status, log_excerpt, error_code, started_at, ended_at
+                FROM run_steps
+                WHERE run_id = ?
+                ORDER BY id ASC
+                """,
+                (run_id,),
+            ).fetchall()
+            return list(rows)
+
+    def upsert_trigger(
+        self,
+        *,
+        project: str,
+        trigger_type: str,
+        trigger_ref: str,
+        idempotency_key: str,
+        payload: str | None = None,
+    ) -> int:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            conn.execute(
+                """
+                INSERT INTO triggers(project_id, trigger_type, trigger_ref, idempotency_key, payload)
+                VALUES(?, ?, ?, ?, ?)
+                ON CONFLICT(idempotency_key) DO UPDATE SET
+                    payload = excluded.payload,
+                    triggered_at = datetime('now')
+                """,
+                (project_id, trigger_type, trigger_ref, idempotency_key, payload),
+            )
+            row = conn.execute(
+                "SELECT id FROM triggers WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Trigger upsert failed")
+            return int(row["id"])
 
     def _base_task_sql(self) -> str:
         return """

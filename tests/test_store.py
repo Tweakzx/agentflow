@@ -103,6 +103,40 @@ class StoreTests(unittest.TestCase):
         self.assertEqual("approved", reset_task.status)
         self.assertIsNone(reset_task.assigned_agent)
 
+    def test_run_ledger_lifecycle(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="run-ledger-test",
+            description=None,
+            priority=5,
+            impact=5,
+            effort=2,
+            source="github",
+            external_id="9001",
+        )
+
+        run_id = self.store.create_run(
+            task_id=task_id,
+            project="demo",
+            trigger_type="comment",
+            trigger_ref="pr#12:comment#34",
+            adapter="mock",
+            agent_name="codex-a",
+            idempotency_key="pr12-comment34",
+        )
+        self.store.append_run_step(run_id, "claim", "passed", "claimed task")
+        self.store.finalize_run(run_id, "passed", gate_passed=True, result_summary="all checks passed")
+
+        runs = self.store.list_runs(task_id)
+        steps = self.store.list_run_steps(run_id)
+
+        self.assertEqual(1, len(runs))
+        self.assertEqual("passed", runs[0]["status"])
+        self.assertTrue(bool(runs[0]["gate_passed"]))
+        self.assertEqual(1, len(steps))
+        self.assertEqual("claim", steps[0]["step_name"])
+
 
 if __name__ == "__main__":
     unittest.main()

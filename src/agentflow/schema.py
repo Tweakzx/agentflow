@@ -50,9 +50,69 @@ CREATE TABLE IF NOT EXISTS links (
     FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    trigger_type TEXT NOT NULL,
+    trigger_ref TEXT NOT NULL,
+    adapter TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    workspace_ref TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    gate_passed INTEGER NOT NULL DEFAULT 0,
+    result_summary TEXT,
+    error_code TEXT,
+    error_detail TEXT,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT,
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS run_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    step_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    log_excerpt TEXT,
+    error_code TEXT,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS triggers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    trigger_type TEXT NOT NULL,
+    trigger_ref TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    payload TEXT,
+    triggered_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS gate_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL UNIQUE,
+    required_checks TEXT NOT NULL DEFAULT '[]',
+    commands TEXT NOT NULL DEFAULT '[]',
+    timeout_sec INTEGER NOT NULL DEFAULT 1800,
+    retry_policy TEXT NOT NULL DEFAULT '{}',
+    artifact_policy TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_priority ON tasks(project_id, priority DESC, impact DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks(lease_until, assigned_agent);
+CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
+CREATE INDEX IF NOT EXISTS idx_runs_project_id ON runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_run_steps_run_id ON run_steps(run_id);
+CREATE INDEX IF NOT EXISTS idx_triggers_project_id ON triggers(project_id);
 """
 
 
