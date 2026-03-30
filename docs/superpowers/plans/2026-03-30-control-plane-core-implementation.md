@@ -1,6 +1,6 @@
 # Control Plane Core Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement AgentFlow control-plane core so task execution is auditable, lease-safe, and gate-enforced for GitHub-triggered multi-round task updates.
 
@@ -17,29 +17,29 @@
 - Modify: `src/agentflow/store.py`
 - Test: `tests/test_store.py`
 
-- [ ] **Step 1: Write failing tests for run lifecycle APIs**
+- [x] **Step 1: Write failing tests for run lifecycle APIs**
 
 Add tests for creating a run, appending steps, and finalizing run status.
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run: `cd /home/shawn/github/agentflow && PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v`
 Expected: FAIL on missing run ledger methods/tables.
 
-- [ ] **Step 3: Add schema tables for run ledger**
+- [x] **Step 3: Add schema tables for run ledger**
 
 Implement tables: `runs`, `run_steps`, `triggers`, `gate_profiles` and indexes.
 
-- [ ] **Step 4: Implement store methods**
+- [x] **Step 4: Implement store methods**
 
 Add methods: `create_run`, `append_run_step`, `finalize_run`, `list_runs`, `list_run_steps`, `upsert_trigger`.
 
-- [ ] **Step 5: Run tests to pass**
+- [x] **Step 5: Run tests to pass**
 
 Run the unittest command above.
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/agentflow/schema.py src/agentflow/store.py tests/test_store.py
@@ -53,12 +53,12 @@ git commit -m "feat: add run ledger tables and store APIs"
 - Create: `src/agentflow/services/gates.py`
 - Test: `tests/test_gates.py`
 
-- [ ] **Step 1: Write failing tests for gate profile read/write and evaluation**
-- [ ] **Step 2: Run tests and confirm failure**
-- [ ] **Step 3: Implement gate profile persistence and parser**
-- [ ] **Step 4: Implement gate evaluator result model**
-- [ ] **Step 5: Run tests to pass**
-- [ ] **Step 6: Commit**
+- [x] **Step 1: Write failing tests for gate profile read/write and evaluation**
+- [x] **Step 2: Run tests and confirm failure**
+- [x] **Step 3: Implement gate profile persistence and parser**
+- [x] **Step 4: Implement gate evaluator result model**
+- [x] **Step 5: Run tests to pass**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/agentflow/store.py src/agentflow/services/gates.py tests/test_gates.py
@@ -72,12 +72,12 @@ git commit -m "feat: add gate profile persistence and evaluator"
 - Create: `src/agentflow/services/triggers.py`
 - Test: `tests/test_triggers.py`
 
-- [ ] **Step 1: Write failing idempotency tests**
-- [ ] **Step 2: Run tests and confirm failure**
-- [ ] **Step 3: Implement idempotency key check + trigger upsert**
-- [ ] **Step 4: Implement trigger-to-run linking helpers**
-- [ ] **Step 5: Run tests to pass**
-- [ ] **Step 6: Commit**
+- [x] **Step 1: Write failing idempotency tests**
+- [x] **Step 2: Run tests and confirm failure**
+- [x] **Step 3: Implement idempotency key check + trigger upsert**
+- [x] **Step 4: Implement trigger-to-run linking helpers**
+- [x] **Step 5: Run tests to pass**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/agentflow/store.py src/agentflow/services/triggers.py tests/test_triggers.py
@@ -91,13 +91,13 @@ git commit -m "feat: add trigger idempotency and event recording"
 - Modify: `src/agentflow/adapters/base.py`
 - Modify: `tests/test_runner.py`
 
-- [ ] **Step 1: Write failing tests for run steps + gate result wiring**
-- [ ] **Step 2: Run tests and confirm failure**
-- [ ] **Step 3: Update runner to create run record before execution**
-- [ ] **Step 4: Append run steps throughout execution lifecycle**
-- [ ] **Step 5: Enforce gate result before status advance to pr_ready/pr_open**
-- [ ] **Step 6: Run tests to pass**
-- [ ] **Step 7: Commit**
+- [x] **Step 1: Write failing tests for run steps + gate result wiring**
+- [x] **Step 2: Run tests and confirm failure**
+- [x] **Step 3: Update runner to create run record before execution**
+- [x] **Step 4: Append run steps throughout execution lifecycle**
+- [x] **Step 5: Enforce gate result before status advance to pr_ready/pr_open**
+- [x] **Step 6: Run tests to pass**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/agentflow/services/runner.py src/agentflow/adapters/base.py tests/test_runner.py
@@ -111,12 +111,12 @@ git commit -m "feat: wire runner with run ledger and gate enforcement"
 - Test: `tests/test_cli_smoke.py`
 - Modify: `README.md`
 
-- [ ] **Step 1: Write failing CLI smoke tests for run inspection commands**
-- [ ] **Step 2: Run tests and confirm failure**
-- [ ] **Step 3: Add commands: `runs`, `run-steps`, `triggers`, `gate-profile`**
-- [ ] **Step 4: Update README with new ops workflow**
-- [ ] **Step 5: Run tests to pass**
-- [ ] **Step 6: Commit**
+- [x] **Step 1: Write failing CLI smoke tests for run inspection commands**
+- [x] **Step 2: Run tests and confirm failure**
+- [x] **Step 3: Add commands: `runs`, `run-steps`, `triggers`, `gate-profile`**
+- [x] **Step 4: Update README with new ops workflow**
+- [x] **Step 5: Run tests to pass**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/agentflow/cli.py tests/test_cli_smoke.py README.md
@@ -129,14 +129,14 @@ git commit -m "feat: add run inspection and gate profile CLI commands"
 - Modify: `docs/superpowers/specs/2026-03-30-control-plane-core-design.md`
 - Modify: `docs/superpowers/specs/2026-03-30-control-plane-presentation-design.md`
 
-- [ ] **Step 1: Execute end-to-end verification script**
+- [x] **Step 1: Execute end-to-end verification script**
 
 Run:
 `cd /home/shawn/github/agentflow && PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v`
 
 Expected: All tests pass.
 
-- [ ] **Step 2: Validate manual smoke flow**
+- [x] **Step 2: Validate manual smoke flow**
 
 Run:
 - `agentflow --db ./data/agentflow.db init`
@@ -146,8 +146,8 @@ Run:
 
 Expected: run and task status updates are visible and auditable.
 
-- [ ] **Step 3: Document implemented vs planned status**
-- [ ] **Step 4: Commit**
+- [x] **Step 3: Document implemented vs planned status**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-03-30-control-plane-core-design.md docs/superpowers/specs/2026-03-30-control-plane-presentation-design.md

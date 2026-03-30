@@ -252,6 +252,9 @@
 3. Trigger 幂等注册服务（`idempotency_key` 去重）
 4. Runner 集成 run ledger + gate enforcement（门禁失败自动 `blocked`）
 5. CLI 可观测命令：`runs`, `run-steps`, `triggers`, `gate-profile`
+6. 定时发现服务：`discover-issues`（issues payload 幂等入库）
+7. 评论事件服务：`handle-comment`（`/agentflow run` 触发 + 幂等去重）
+8. 按任务精确执行：`Runner.run_task(...)`（非随机队列命中）
 
 ## 14. 会话连续性策略（新增）
 
