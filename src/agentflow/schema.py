@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     external_id TEXT,
     branch TEXT,
     pr_url TEXT,
+    assigned_agent TEXT,
+    lease_until TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -50,9 +52,22 @@ CREATE TABLE IF NOT EXISTS links (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_priority ON tasks(project_id, priority DESC, impact DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks(lease_until, assigned_agent);
 """
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row[1] == column for row in rows)
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+
+    # Lightweight forward-only migrations for existing local DB files.
+    if not _column_exists(conn, "tasks", "assigned_agent"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN assigned_agent TEXT")
+    if not _column_exists(conn, "tasks", "lease_until"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN lease_until TEXT")
+
     conn.commit()

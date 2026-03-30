@@ -14,6 +14,7 @@ A DB-first task and issue management system designed for multiple coding agents.
 - Board and stats views in terminal
 - Markdown export per project
 - Lightweight HTML dashboard generation
+- Multi-agent safe claiming with lease/heartbeat/release
 
 ## Quick Start
 
@@ -26,6 +27,10 @@ agentflow init --db ./data/agentflow.db
 agentflow create-project kthena --repo volcano-sh/kthena
 agentflow add-task --project kthena --title "controller partition revision bug" --priority 5 --impact 5 --effort 2 --source github --external-id 841
 agentflow next --project kthena
+agentflow claim-next --project kthena --agent codex-worker-1
+agentflow heartbeat 1 --agent codex-worker-1 --lease-minutes 30
+agentflow workers --project kthena
+agentflow release 1 --agent codex-worker-1 --to-status approved
 agentflow board --project kthena
 agentflow dashboard --db ./data/agentflow.db --out ./dashboard.html
 ```

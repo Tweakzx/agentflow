@@ -60,6 +60,49 @@ class StoreTests(unittest.TestCase):
         ranked = self.store.next_tasks("demo", 2)
         self.assertEqual("high impact", ranked[0].title)
 
+    def test_claim_heartbeat_release(self) -> None:
+        self.store.create_project("demo", None)
+        self.store.add_task(
+            project="demo",
+            title="task-a",
+            description=None,
+            priority=5,
+            impact=5,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        self.store.add_task(
+            project="demo",
+            title="task-b",
+            description=None,
+            priority=4,
+            impact=4,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+
+        claimed = self.store.claim_next_task("demo", "codex", lease_minutes=10)
+        self.assertIsNotNone(claimed)
+        assert claimed is not None
+        self.assertEqual("in_progress", claimed.status)
+        self.assertEqual("codex", claimed.assigned_agent)
+
+        heartbeat_ok = self.store.heartbeat(claimed.id, "codex", lease_minutes=20)
+        self.assertTrue(heartbeat_ok)
+
+        wrong_release = self.store.release_claim(claimed.id, "other-agent", to_status="approved")
+        self.assertFalse(wrong_release)
+
+        release_ok = self.store.release_claim(claimed.id, "codex", to_status="approved")
+        self.assertTrue(release_ok)
+
+        tasks = self.store.list_tasks("demo")
+        reset_task = [t for t in tasks if t.id == claimed.id][0]
+        self.assertEqual("approved", reset_task.status)
+        self.assertIsNone(reset_task.assigned_agent)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,25 @@ def _parser() -> argparse.ArgumentParser:
     p_next.add_argument("--project", required=True)
     p_next.add_argument("--limit", type=int, default=5)
 
+    p_claim = sub.add_parser("claim-next", help="Atomically claim next task for an agent")
+    p_claim.add_argument("--project", required=True)
+    p_claim.add_argument("--agent", required=True)
+    p_claim.add_argument("--lease-minutes", type=int, default=30)
+
+    p_heartbeat = sub.add_parser("heartbeat", help="Extend lease on a claimed task")
+    p_heartbeat.add_argument("task_id", type=int)
+    p_heartbeat.add_argument("--agent", required=True)
+    p_heartbeat.add_argument("--lease-minutes", type=int, default=30)
+
+    p_release = sub.add_parser("release", help="Release a claimed task")
+    p_release.add_argument("task_id", type=int)
+    p_release.add_argument("--agent", required=True)
+    p_release.add_argument("--to-status", default="approved")
+    p_release.add_argument("--note")
+
+    p_workers = sub.add_parser("workers", help="List in-progress tasks with assigned agents")
+    p_workers.add_argument("--project")
+
     p_move = sub.add_parser("move", help="Move task status")
     p_move.add_argument("task_id", type=int)
     p_move.add_argument("to_status")
@@ -57,11 +76,13 @@ def _print_tasks(tasks) -> None:
     if not tasks:
         print("(no tasks)")
         return
-    print("id  project  status       pri imp eff score  title")
-    print("--  -------  -----------  --- --- --- -----  -----")
+    print("id  project  status       pri imp eff score  agent         lease_until           title")
+    print("--  -------  -----------  --- --- --- -----  ------------  -------------------  -----")
     for t in tasks:
+        agent = t.assigned_agent or "-"
+        lease = t.lease_until or "-"
         print(
-            f"{t.id:<3} {t.project:<8} {t.status:<11}  {t.priority:<3} {t.impact:<3} {t.effort:<3} {t.score:<5.1f}  {t.title}"
+            f"{t.id:<3} {t.project:<8} {t.status:<11}  {t.priority:<3} {t.impact:<3} {t.effort:<3} {t.score:<5.1f}  {agent:<12}  {lease:<19}  {t.title}"
         )
 
 
@@ -71,7 +92,6 @@ def main() -> None:
     store = Store(args.db)
 
     if args.command == "init":
-        # Schema creation happens on first connection.
         with store.connect():
             pass
         print(f"initialized: {args.db}")
@@ -103,6 +123,29 @@ def main() -> None:
 
     if args.command == "next":
         tasks = store.next_tasks(args.project, args.limit)
+        _print_tasks(tasks)
+        return
+
+    if args.command == "claim-next":
+        task = store.claim_next_task(args.project, args.agent, args.lease_minutes)
+        if task is None:
+            print("no claimable task")
+        else:
+            _print_tasks([task])
+        return
+
+    if args.command == "heartbeat":
+        ok = store.heartbeat(args.task_id, args.agent, args.lease_minutes)
+        print("heartbeat ok" if ok else "heartbeat ignored (not owner or not in_progress)")
+        return
+
+    if args.command == "release":
+        ok = store.release_claim(args.task_id, args.agent, args.to_status, args.note)
+        print("released" if ok else "release ignored (not owner)")
+        return
+
+    if args.command == "workers":
+        tasks = store.list_in_progress(args.project)
         _print_tasks(tasks)
         return
 
