@@ -35,6 +35,10 @@ agentflow release 1 --agent codex-worker-1 --to-status approved
 agentflow adapters
 agentflow run-once --project kthena --adapter mock --agent codex-worker-1
 agentflow run-batch --project kthena --adapter mock --agent-prefix worker --count 3
+agentflow runs --task-id 1
+agentflow run-steps 1
+agentflow triggers --project kthena
+agentflow gate-profile --project kthena
 agentflow board --project kthena
 agentflow dashboard --db ./data/agentflow.db --out ./dashboard.html
 ```

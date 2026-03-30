@@ -43,6 +43,33 @@ class RunnerTests(unittest.TestCase):
         self.assertIsNone(record.task)
         self.assertIn("no claimable", record.message)
 
+    def test_run_once_blocks_when_gate_fails(self) -> None:
+        self.store.upsert_gate_profile(
+            project="demo",
+            required_checks=["unit"],
+            commands=["python3 -c \"import sys; sys.exit(3)\""],
+            timeout_sec=30,
+            retry_policy={"max_retries": 0},
+            artifact_policy={},
+        )
+        self.store.add_task(
+            project="demo",
+            title="fix crash on startup",
+            description=None,
+            priority=5,
+            impact=5,
+            effort=2,
+            source="github",
+            external_id="101",
+        )
+        runner = Runner(self.store, AdapterRegistry())
+        record = runner.run_once("demo", "mock", "codex-worker")
+
+        self.assertIsNotNone(record.task)
+        assert record.task is not None
+        self.assertEqual("blocked", record.task.status)
+        self.assertFalse(record.success)
+
 
 if __name__ == "__main__":
     unittest.main()

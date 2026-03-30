@@ -71,6 +71,18 @@ def _parser() -> argparse.ArgumentParser:
     p_dashboard = sub.add_parser("dashboard", help="Generate HTML dashboard")
     p_dashboard.add_argument("--out", default="./dashboard.html")
 
+    p_runs = sub.add_parser("runs", help="List runs for a task")
+    p_runs.add_argument("--task-id", required=True, type=int)
+
+    p_run_steps = sub.add_parser("run-steps", help="List run steps")
+    p_run_steps.add_argument("run_id", type=int)
+
+    p_triggers = sub.add_parser("triggers", help="List trigger records")
+    p_triggers.add_argument("--project")
+
+    p_gate = sub.add_parser("gate-profile", help="Show gate profile for project")
+    p_gate.add_argument("--project", required=True)
+
     sub.add_parser("adapters", help="List registered adapters")
 
     p_run_once = sub.add_parser("run-once", help="Claim and run one task through an adapter")
@@ -193,6 +205,53 @@ def main() -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(html, encoding="utf-8")
         print(f"dashboard written: {out_path}")
+        return
+
+    if args.command == "runs":
+        rows = store.list_runs(args.task_id)
+        if not rows:
+            print("(no runs)")
+            return
+        for row in rows:
+            print(
+                f"{row['id']} task={row['task_id']} status={row['status']} "
+                f"gate_passed={row['gate_passed']} adapter={row['adapter']} agent={row['agent_name']}"
+            )
+        return
+
+    if args.command == "run-steps":
+        rows = store.list_run_steps(args.run_id)
+        if not rows:
+            print("(no run steps)")
+            return
+        for row in rows:
+            print(
+                f"{row['id']} run={row['run_id']} step={row['step_name']} status={row['status']} "
+                f"log={row['log_excerpt'] or '-'}"
+            )
+        return
+
+    if args.command == "triggers":
+        rows = store.list_triggers(args.project)
+        if not rows:
+            print("(no triggers)")
+            return
+        for row in rows:
+            print(
+                f"{row['id']} project={row['project']} type={row['trigger_type']} "
+                f"ref={row['trigger_ref']} key={row['idempotency_key']}"
+            )
+        return
+
+    if args.command == "gate-profile":
+        profile = store.get_gate_profile(args.project)
+        if profile is None:
+            print("(no gate profile)")
+            return
+        print(f"project={args.project}")
+        print(f"required_checks={profile['required_checks']}")
+        print(f"commands={profile['commands']}")
+        print(f"timeout_sec={profile['timeout_sec']}")
         return
 
     if args.command == "adapters":

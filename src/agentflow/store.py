@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -248,6 +249,103 @@ class Store:
             if row is None:
                 raise ValueError("Trigger upsert failed")
             return int(row["id"])
+
+    def get_trigger_by_key(self, idempotency_key: str) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, project_id, trigger_type, trigger_ref, idempotency_key, payload, triggered_at
+                FROM triggers
+                WHERE idempotency_key = ?
+                """,
+                (idempotency_key,),
+            ).fetchone()
+            return row
+
+    def list_triggers(self, project: str | None = None) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            if project is None:
+                rows = conn.execute(
+                    """
+                    SELECT tr.id, p.name AS project, tr.trigger_type, tr.trigger_ref,
+                           tr.idempotency_key, tr.payload, tr.triggered_at
+                    FROM triggers tr
+                    JOIN projects p ON p.id = tr.project_id
+                    ORDER BY tr.id DESC
+                    """
+                ).fetchall()
+                return list(rows)
+
+            project_id = self._project_id(conn, project)
+            rows = conn.execute(
+                """
+                SELECT tr.id, ? AS project, tr.trigger_type, tr.trigger_ref,
+                       tr.idempotency_key, tr.payload, tr.triggered_at
+                FROM triggers tr
+                WHERE tr.project_id = ?
+                ORDER BY tr.id DESC
+                """,
+                (project, project_id),
+            ).fetchall()
+            return list(rows)
+
+    def upsert_gate_profile(
+        self,
+        *,
+        project: str,
+        required_checks: list[str],
+        commands: list[str],
+        timeout_sec: int = 1800,
+        retry_policy: dict[str, object] | None = None,
+        artifact_policy: dict[str, object] | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            conn.execute(
+                """
+                INSERT INTO gate_profiles(
+                    project_id, required_checks, commands, timeout_sec, retry_policy, artifact_policy, updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(project_id) DO UPDATE SET
+                    required_checks = excluded.required_checks,
+                    commands = excluded.commands,
+                    timeout_sec = excluded.timeout_sec,
+                    retry_policy = excluded.retry_policy,
+                    artifact_policy = excluded.artifact_policy,
+                    updated_at = datetime('now')
+                """,
+                (
+                    project_id,
+                    json.dumps(required_checks),
+                    json.dumps(commands),
+                    timeout_sec,
+                    json.dumps(retry_policy or {}),
+                    json.dumps(artifact_policy or {}),
+                ),
+            )
+
+    def get_gate_profile(self, project: str) -> dict[str, object] | None:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            row = conn.execute(
+                """
+                SELECT required_checks, commands, timeout_sec, retry_policy, artifact_policy, updated_at
+                FROM gate_profiles
+                WHERE project_id = ?
+                """,
+                (project_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return {
+                "required_checks": json.loads(row["required_checks"]),
+                "commands": json.loads(row["commands"]),
+                "timeout_sec": int(row["timeout_sec"]),
+                "retry_policy": json.loads(row["retry_policy"]),
+                "artifact_policy": json.loads(row["artifact_policy"]),
+                "updated_at": row["updated_at"],
+            }
 
     def _base_task_sql(self) -> str:
         return """
