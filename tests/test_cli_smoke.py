@@ -120,6 +120,7 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(args.command, "serve")
         self.assertEqual(args.host, "127.0.0.1")
         self.assertEqual(args.port, 8787)
+        self.assertIsNone(args.github_webhook_secret)
 
 
 if __name__ == "__main__":

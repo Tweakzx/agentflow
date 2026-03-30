@@ -69,6 +69,12 @@ Start the control console:
 agentflow serve --db ./data/agentflow.db --host 127.0.0.1 --port 8787
 ```
 
+Enable webhook signature verification (recommended for public endpoints):
+
+```bash
+agentflow serve --db ./data/agentflow.db --host 0.0.0.0 --port 8787 --github-webhook-secret "$GITHUB_WEBHOOK_SECRET"
+```
+
 Then open:
 
 `http://127.0.0.1:8787`
@@ -76,9 +82,23 @@ Then open:
 Current console capabilities:
 
 - Task center list with search and status filter
-- Task detail pane with history and scoring fields
-- Run timeline drawer with run steps
+- Project metric cards (pending/in-progress/blocked/recent runs)
+- Status board columns for quick triage
+- Recent run stream with adapter/agent timeline
+- Task detail pane with history and run steps
 - One-click task execution (`POST /api/task/{id}/run`) for adapter-triggered run
+
+Webhook endpoints exposed by `serve`:
+
+- `POST /webhook/github/comment?project=<project>&adapter=mock&agent=bot`
+  - Payload: GitHub `issue_comment` style body
+  - Trigger command: comment body contains `/agentflow run`
+- `POST /webhook/github/issues?project=<project>`
+  - Payload: `{"issues":[...]}` or single issue object (`number`, `title`, optional `body`, `priority`, `impact`, `effort`)
+  - Behavior: ingest scheduled discovery issues
+- `POST /webhook/github?project=<project>&adapter=mock&agent=bot`
+  - Uses `X-GitHub-Event` for event routing (`issue_comment`, `pull_request_review_comment`, `issues`, `ping`)
+  - Optional signature header support: `X-Hub-Signature-256`
 
 ## Event-Driven Workflow (Current CLI Form)
 

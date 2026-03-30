@@ -137,6 +137,34 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(1, len(steps))
         self.assertEqual("claim", steps[0]["step_name"])
 
+    def test_list_recent_runs(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="recent-runs-test",
+            description=None,
+            priority=4,
+            impact=4,
+            effort=2,
+            source="github",
+            external_id="9010",
+        )
+        run_id = self.store.create_run(
+            task_id=task_id,
+            project="demo",
+            trigger_type="manual",
+            trigger_ref="runner:mock",
+            adapter="mock",
+            agent_name="tester",
+            idempotency_key="recent-runs-1",
+        )
+        self.store.finalize_run(run_id, "passed", gate_passed=True, result_summary="ok")
+
+        runs = self.store.list_recent_runs("demo", limit=10)
+        self.assertEqual(1, len(runs))
+        self.assertEqual(task_id, int(runs[0]["task_id"]))
+        self.assertEqual("recent-runs-test", runs[0]["task_title"])
+
 
 if __name__ == "__main__":
     unittest.main()

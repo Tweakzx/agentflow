@@ -221,6 +221,25 @@ class Store:
             ).fetchall()
             return list(rows)
 
+    def list_recent_runs(self, project: str, limit: int = 20) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            rows = conn.execute(
+                """
+                SELECT r.id, r.task_id, t.title AS task_title, ? AS project,
+                       r.trigger_type, r.trigger_ref, r.adapter, r.agent_name,
+                       r.status, r.gate_passed, r.result_summary, r.error_code, r.error_detail,
+                       r.idempotency_key, r.started_at, r.finished_at
+                FROM runs r
+                JOIN tasks t ON t.id = r.task_id
+                WHERE r.project_id = ?
+                ORDER BY r.id DESC
+                LIMIT ?
+                """,
+                (project, project_id, limit),
+            ).fetchall()
+            return list(rows)
+
     def upsert_trigger(
         self,
         *,
