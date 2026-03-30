@@ -123,7 +123,7 @@ INDEX_HTML = """<!doctype html>
     .ok { color: var(--ok); font-weight: 600; }
     .board-wrap {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 10px;
       padding: 0 14px 14px;
     }
@@ -167,13 +167,13 @@ INDEX_HTML = """<!doctype html>
     @media (max-width: 1200px) {
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .layout { grid-template-columns: 1fr; }
-      .board-wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .board-wrap { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .split { grid-template-columns: 1fr; }
       .detail-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
     }
     @media (max-width: 700px) {
       .grid { grid-template-columns: 1fr; }
-      .board-wrap { grid-template-columns: 1fr; }
+      .board-wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .detail-grid { grid-template-columns: 1fr; }
     }
   </style>
@@ -229,12 +229,8 @@ INDEX_HTML = """<!doctype html>
       <div id=\"recentRuns\" class=\"list\"></div>
     </section>
     <section class=\"panel\">
-      <h3>Webhook Guide</h3>
-      <div class=\"list\">
-        <div class=\"timeline-item\"><span class=\"sub\">Comment trigger:</span><br/>POST <code>/webhook/github/comment?project=&lt;name&gt;&adapter=mock&agent=bot</code></div>
-        <div class=\"timeline-item\"><span class=\"sub\">Discovery trigger:</span><br/>POST <code>/webhook/github/issues?project=&lt;name&gt;</code></div>
-        <div class=\"timeline-item\"><span class=\"sub\">Auto event endpoint:</span><br/>POST <code>/webhook/github?project=&lt;name&gt;&adapter=mock&agent=bot</code> with <code>X-GitHub-Event</code></div>
-      </div>
+      <h3>Audit Trail</h3>
+      <div id=\"auditList\" class=\"list\"></div>
     </section>
   </section>
 
@@ -246,6 +242,7 @@ INDEX_HTML = """<!doctype html>
       selectedTask: null,
       autoTimer: null,
       recentRuns: [],
+      audit: [],
       stats: {},
     };
 
@@ -265,6 +262,16 @@ INDEX_HTML = """<!doctype html>
       if (status === 'merged' || status === 'skipped') return 'done';
       if (status === 'blocked') return 'blocked';
       return 'other';
+    }
+
+    function targetStatusForStage(stage) {
+      if (stage === 'collected') return 'pending';
+      if (stage === 'triaged') return 'approved';
+      if (stage === 'executing') return 'in_progress';
+      if (stage === 'review') return 'pr_ready';
+      if (stage === 'done') return 'merged';
+      if (stage === 'blocked') return 'blocked';
+      return 'pending';
     }
 
     async function loadProjects() {
@@ -307,10 +314,13 @@ INDEX_HTML = """<!doctype html>
       const project = currentProject();
       const statsData = await api(`/api/stats?project=${encodeURIComponent(project)}`);
       const runsData = await api(`/api/runs/recent?project=${encodeURIComponent(project)}&limit=20`);
+      const auditData = await api(`/api/audit?project=${encodeURIComponent(project)}&limit=30`);
       state.stats = statsData;
       state.recentRuns = runsData.runs || [];
+      state.audit = auditData.events || [];
       renderCards();
       renderRecentRuns();
+      renderAudit();
     }
 
     function renderCards() {
@@ -358,12 +368,14 @@ INDEX_HTML = """<!doctype html>
     }
 
     function renderBoard() {
-      const statuses = ['pending', 'approved', 'in_progress', 'blocked'];
+      const stages = ['collected', 'triaged', 'executing', 'review', 'done', 'blocked'];
       const root = document.getElementById('board');
-      root.innerHTML = statuses.map(st => {
-        const tasks = state.tasks.filter(t => t.status === st).slice(0, 8);
-        const items = tasks.map(t => `<div class=\"chip\" onclick=\"openTask(${t.id})\">#${t.id} ${t.title}</div>`).join('') || '<div class=\"sub\" style=\"padding:10px\">(empty)</div>';
-        return `<section class=\"col\"><h4>${st} (${tasks.length})</h4>${items}</section>`;
+      root.innerHTML = stages.map(st => {
+        const tasks = state.tasks.filter(t => stageOf(t.status) === st).slice(0, 12);
+        const items = tasks.map(
+          t => `<div class=\"chip\" draggable=\"true\" ondragstart=\"dragTask(event, ${t.id})\" onclick=\"openTask(${t.id})\">#${t.id} ${t.title}<div class=\"sub\">${t.status}</div></div>`
+        ).join('') || '<div class=\"sub\" style=\"padding:10px\">(empty)</div>';
+        return `<section class=\"col\" ondragover=\"allowDrop(event)\" ondrop=\"dropToStage(event, '${st}')\"><h4>${st} (${tasks.length})</h4>${items}</section>`;
       }).join('');
     }
 
@@ -379,6 +391,38 @@ INDEX_HTML = """<!doctype html>
           <div class=\"meta\"><span>${r.status}</span><span>${r.adapter}</span><span>${r.agent_name}</span><span>${r.started_at}</span></div>
         </div>
       `).join('');
+    }
+
+    function renderAudit() {
+      const root = document.getElementById('auditList');
+      if (!state.audit.length) {
+        root.innerHTML = '<div class=\"sub\">No audit events yet</div>';
+        return;
+      }
+      root.innerHTML = state.audit.map(e => `
+        <div class=\"run-item\">
+          <div><strong>#${e.task_id}</strong> ${e.task_title || ''}</div>
+          <div class=\"meta\"><span>${e.from_status || '-'}</span><span>-></span><span>${e.to_status}</span><span>${e.changed_at}</span></div>
+          <div class=\"sub\">${e.note || '-'}</div>
+        </div>
+      `).join('');
+    }
+
+    function dragTask(ev, taskId) {
+      ev.dataTransfer.setData('task_id', String(taskId));
+    }
+
+    function allowDrop(ev) {
+      ev.preventDefault();
+    }
+
+    async function dropToStage(ev, stage) {
+      ev.preventDefault();
+      const raw = ev.dataTransfer.getData('task_id');
+      const taskId = parseInt(raw, 10);
+      if (!taskId) return;
+      const toStatus = targetStatusForStage(stage);
+      await moveTask(taskId, toStatus, `drag to ${stage}`, false);
     }
 
     async function openTask(taskId) {
@@ -425,7 +469,8 @@ INDEX_HTML = """<!doctype html>
             <option value=\"blocked\">blocked</option>
           </select>
           <input id=\"moveNoteInput\" placeholder=\"note for manual transition\" />
-          <button class=\"secondary\" onclick=\"moveTask(${t.id})\">Update Flow</button>
+          <label class=\"sub\" style=\"display:flex;align-items:center;gap:4px;\"><input id=\"moveForceCk\" type=\"checkbox\" style=\"width:auto;\" />force</label>
+          <button class=\"secondary\" onclick=\"moveTask(${t.id}, null, null, null)\">Update Flow</button>
         </div>
         <div class=\"history\">
           <h4 style=\"margin:0 0 8px\">Status History</h4>
@@ -464,14 +509,15 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
-    async function moveTask(taskId) {
-      const toStatus = document.getElementById('moveStatusSel').value;
-      const note = document.getElementById('moveNoteInput').value || '';
+    async function moveTask(taskId, forcedStatus, forcedNote, forcedForce) {
+      const toStatus = forcedStatus || document.getElementById('moveStatusSel').value;
+      const note = forcedNote !== null && forcedNote !== undefined ? forcedNote : (document.getElementById('moveNoteInput').value || '');
+      const force = forcedForce !== null && forcedForce !== undefined ? Boolean(forcedForce) : Boolean(document.getElementById('moveForceCk')?.checked);
       try {
         const res = await api(`/api/task/${taskId}/move`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ to_status: toStatus, note })
+          body: JSON.stringify({ to_status: toStatus, note, force })
         });
         await refreshAll();
         await openTask(taskId);
@@ -549,6 +595,25 @@ def _flow_stage_for_status(status: str) -> str:
         "blocked": "blocked",
     }
     return mapping.get(status, "other")
+
+
+def _validate_manual_transition(from_status: str, to_status: str) -> str | None:
+    allowed = {
+        "pending": {"approved", "blocked", "skipped"},
+        "approved": {"pending", "in_progress", "blocked", "skipped"},
+        "in_progress": {"approved", "pr_ready", "blocked"},
+        "pr_ready": {"approved", "pr_open", "blocked"},
+        "pr_open": {"approved", "merged", "blocked"},
+        "blocked": {"pending", "approved", "skipped"},
+        "merged": set(),
+        "skipped": set(),
+    }
+    next_set = allowed.get(from_status)
+    if next_set is None:
+        return f"unknown current status: {from_status}"
+    if to_status not in next_set:
+        return f"transition not allowed: {from_status} -> {to_status}"
+    return None
 
 
 def _build_handler(
@@ -649,6 +714,20 @@ def _build_handler(
                 self._send_json({"project": project, "stages": grouped})
                 return
 
+            if path == "/api/audit":
+                project = query.get("project", [None])[0]
+                if not project:
+                    self._send_json({"error": "project is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                raw_limit = query.get("limit", ["50"])[0]
+                try:
+                    limit = max(1, min(200, int(raw_limit)))
+                except ValueError:
+                    limit = 50
+                rows = [_row_to_dict(r) for r in store.list_recent_status_history(project, limit=limit)]
+                self._send_json({"project": project, "events": rows})
+                return
+
             if path.startswith("/api/task/"):
                 parts = path.strip("/").split("/")
                 if len(parts) == 3:
@@ -718,11 +797,36 @@ def _build_handler(
                 payload = self._parse_json(body)
                 to_status = str(payload.get("to_status") or "").strip()
                 note = payload.get("note")
+                force = bool(payload.get("force", False))
                 if not to_status:
                     self._send_json({"error": "to_status is required"}, status=HTTPStatus.BAD_REQUEST)
                     return
+                task = store.get_task(task_id)
+                if task is None:
+                    self._send_json({"error": "task not found"}, status=HTTPStatus.NOT_FOUND)
+                    return
+
+                if not force:
+                    transition_error = _validate_manual_transition(task.status, to_status)
+                    if transition_error is not None:
+                        self._send_json({"error": transition_error}, status=HTTPStatus.BAD_REQUEST)
+                        return
+
+                    if to_status in {"pr_ready", "pr_open", "merged"}:
+                        runs = store.list_runs(task_id)
+                        latest = runs[0] if runs else None
+                        latest_passed = bool(latest and latest["status"] == "passed" and bool(latest["gate_passed"]))
+                        if not latest_passed:
+                            self._send_json(
+                                {"error": "gate check required: latest run must be passed with gate_passed=1 (or use force=true)"},
+                                status=HTTPStatus.BAD_REQUEST,
+                            )
+                            return
+
+                final_note = str(note) if note is not None else ""
+                final_note = f"[manual-web] {final_note}".strip()
                 try:
-                    store.move_task(task_id, to_status, str(note) if note is not None else None)
+                    store.move_task(task_id, to_status, final_note)
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                     return

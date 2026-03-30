@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from agentflow.console import _flow_stage_for_status
+from agentflow.console import _flow_stage_for_status, _validate_manual_transition
 
 
 class ConsoleFlowTests(unittest.TestCase):
@@ -16,6 +16,13 @@ class ConsoleFlowTests(unittest.TestCase):
         self.assertEqual('done', _flow_stage_for_status('skipped'))
         self.assertEqual('blocked', _flow_stage_for_status('blocked'))
         self.assertEqual('other', _flow_stage_for_status('unknown'))
+
+    def test_manual_transition_validation(self) -> None:
+        self.assertIsNone(_validate_manual_transition('pending', 'approved'))
+        self.assertIsNone(_validate_manual_transition('approved', 'in_progress'))
+        self.assertIsNone(_validate_manual_transition('pr_open', 'merged'))
+        self.assertIsNotNone(_validate_manual_transition('pending', 'merged'))
+        self.assertIsNotNone(_validate_manual_transition('merged', 'approved'))
 
 
 if __name__ == '__main__':

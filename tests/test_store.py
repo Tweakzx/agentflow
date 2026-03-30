@@ -165,6 +165,25 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(task_id, int(runs[0]["task_id"]))
         self.assertEqual("recent-runs-test", runs[0]["task_title"])
 
+    def test_list_recent_status_history(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="status-history-test",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source="github",
+            external_id="9011",
+        )
+        self.store.move_task(task_id, "approved", "triaged")
+
+        events = self.store.list_recent_status_history("demo", limit=10)
+        self.assertGreaterEqual(len(events), 2)
+        self.assertEqual(task_id, int(events[0]["task_id"]))
+        self.assertEqual("status-history-test", events[0]["task_title"])
+
 
 if __name__ == "__main__":
     unittest.main()

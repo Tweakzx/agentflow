@@ -84,10 +84,11 @@ Current console capabilities:
 - Task center list with search and status filter
 - Stage/source filter for issue collection and process routing
 - Project metric cards (pending/in-progress/blocked/recent runs)
-- Status board columns for quick triage
+- Status board columns for quick triage (supports drag-and-drop stage transition)
 - Recent run stream with adapter/agent timeline
 - Task detail pane with history and run steps
-- Manual task flow transition (`pending/approved/in_progress/pr_ready/...`) with notes
+- Manual task flow transition (`pending/approved/in_progress/pr_ready/...`) with notes and optional force
+- Audit trail panel for all manual/automatic status transitions
 - One-click task execution (`POST /api/task/{id}/run`) for adapter-triggered run
 
 Webhook endpoints exposed by `serve`:
@@ -106,6 +107,12 @@ Additional console APIs:
 
 - `GET /api/flow?project=<project>`: grouped tasks by flow stage (`collected/triaged/executing/review/done/blocked`)
 - `POST /api/task/<id>/move`: manual flow transition with payload `{"to_status":"approved","note":"..."}`.
+- `GET /api/audit?project=<project>&limit=30`: recent status transition audit events
+
+Flow safeguards in `/api/task/<id>/move` (when `force` is not set):
+
+- transition graph validation (blocks illegal jumps like `pending -> merged`)
+- review/done entry requires latest run with `status=passed` and `gate_passed=1`
 
 ## Event-Driven Workflow (Current CLI Form)
 

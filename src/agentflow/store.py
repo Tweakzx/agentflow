@@ -405,6 +405,23 @@ class Store:
             ).fetchall()
             return list(rows)
 
+    def list_recent_status_history(self, project: str, limit: int = 50) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            rows = conn.execute(
+                """
+                SELECT sh.id, sh.task_id, t.title AS task_title, ? AS project,
+                       sh.from_status, sh.to_status, sh.note, sh.changed_at
+                FROM status_history sh
+                JOIN tasks t ON t.id = sh.task_id
+                WHERE t.project_id = ?
+                ORDER BY sh.id DESC
+                LIMIT ?
+                """,
+                (project, project_id, limit),
+            ).fetchall()
+            return list(rows)
+
     def get_task_by_external(self, project: str, source: str, external_id: str) -> Task | None:
         with self.connect() as conn:
             row = conn.execute(
