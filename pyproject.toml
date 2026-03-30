@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentflow-hub"
+version = "0.1.0"
+description = "DB-first task and issue management core for multiple coding agents"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Tweakzx" }]
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+agentflow = "agentflow_hub.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
