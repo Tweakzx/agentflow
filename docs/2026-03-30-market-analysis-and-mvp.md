@@ -57,3 +57,7 @@ AgentFlow should be a control plane, not another coding model:
 - Building a full PM SaaS UI.
 - Replacing existing issue trackers.
 - Provider-specific advanced optimization before adapter normalization stabilizes.
+
+## Related Docs
+
+- `docs/2026-03-30-control-plane-vs-workflow.md`
