@@ -219,7 +219,7 @@ INDEX_HTML = """<!doctype html>
 
   <div class=\"layout\">
     <section class=\"panel\">
-      <h3>Task Queue</h3>
+      <h3>Task List</h3>
       <div class=\"filters\">
         <input id=\"q\" placeholder=\"search title...\" oninput=\"renderTaskList()\" />
         <select id=\"stageFilter\" onchange=\"renderTaskList()\">
