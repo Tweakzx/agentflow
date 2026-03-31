@@ -1,66 +1,62 @@
 # AgentFlow
 
-A lightweight, stage-first control plugin for coding agents to discover, manage, execute, and maintain tasks across one or multiple repositories.
+A lightweight, stage-first control plugin that upgrades coding agents with project-level task governance across one or multiple repositories.
 
 Language: English | [中文](./README.zh-CN.md)
 
 ## Positioning
 
-AgentFlow is not another full agent platform.  
-It is a lightweight "control plugin" that enhances existing coding agents with project-level task governance:
+AgentFlow is not a full agent platform. It is a control layer that sits above existing agents and adds:
 
-- issue/task discovery
-- stage-based flow management
-- execution and gate checks
-- PR/Issue link tracking
-- audit-friendly status maintenance
+- issue/task discovery intake
+- stage-first workflow management
+- execution/run traceability
+- gate-aware status transitions
+- audit-friendly lifecycle history
 
-## Why AgentFlow (Advantages)
+## What Is Implemented Today
 
-- Lightweight by default: SQLite-first, local-first, minimal infra.
-- Plugin-first integration: OpenClaw native plugin and bundle templates for other agent ecosystems.
-- Stage-first readability: users manage high-level stages, while internal statuses keep precision.
-- Strong process safeguards: transition validation + gate-aware promotion to review/done.
-- End-to-end traceability: runs, run steps, triggers, and status-history audit.
-- Event + manual hybrid: webhook-driven automation with manual override (force + note) when needed.
-- Multi-repo ready: one control plane can manage multiple projects/repos consistently.
+### Core Engine (CLI + DB)
 
-## Required Changes Toward "Universal Lightweight Plugin"
+- SQLite-first storage: `projects`, `tasks`, `status_history`, `runs`, `run_steps`, `triggers`, `gate_profiles`
+- Task lifecycle and scoring (`next`, `claim-next`, `heartbeat`, `release`, `move`)
+- Run orchestration (`run-once`, `run-batch`) with adapter protocol
+- Trigger idempotency and event ingestion (`discover-issues`, `handle-comment`)
+- Gate enforcement with command checks and blocked-on-fail behavior
 
-The current version is functional, but to fully match the target ("install and use across many agents/repositories"), the next upgrades should focus on:
+### Web Console
 
-1. Universal plugin API surface:
-   - unify around stable cross-agent actions (`pm.capabilities`, `pm.discover`, `pm.run`, `pm.move`, `pm.sync`)
-   - keep adapter layers thin per agent
-2. Multi-repo onboarding simplification:
-   - add one-step repo binding/bootstrap command for batch initialization
-3. Provider abstraction hardening:
-   - formalize GitHub provider contract (discover/create/update/close/sync)
-   - keep core decoupled from provider specifics
-4. Packaging and distribution:
-   - publish OpenClaw plugin package and provide versioned compatibility matrix for other agent bundles
-5. Policy presets:
-   - ship default stage transition profiles and gate presets for common team modes (solo, strict, fast-iterate)
+- Stage Board as top-level view (drag-and-drop stage movement)
+- Task center with `stage/source` filters
+- Task detail with PR-focused panel and related links
+- Manual transition with safeguards + optional `force`
+- Recent runs + audit trail panels
+- APIs:
+  - `GET /api/flow?project=<project>`
+  - `GET /api/audit?project=<project>&limit=30`
+  - `POST /api/task/<id>/run`
+  - `POST /api/task/<id>/move`
 
-## Why
+### Webhook Endpoints (Console)
 
-`oss-change-records` works well as notes, but product-style management needs stronger querying, metrics, and automation. This project uses SQLite as source of truth and keeps Markdown export for portability.
+- `POST /webhook/github/comment?project=<project>&adapter=mock&agent=bot`
+- `POST /webhook/github/issues?project=<project>`
+- `POST /webhook/github?project=<project>&adapter=mock&agent=bot`
+- Optional signature verification: `X-Hub-Signature-256`
 
-## Features (MVP)
+### OpenClaw Native Plugin
 
-- SQLite storage (`projects`, `tasks`, `status_history`, `links`)
-- Run ledger (`runs`, `run_steps`, `triggers`, `gate_profiles`)
-- Task lifecycle management with explicit statuses
-- Priority scoring + `next` recommendation
-- Board and stats views in terminal
-- Markdown export per project
-- Lightweight HTML dashboard generation
-- Interactive web console (task center + run timeline)
-- Multi-agent safe claiming with lease/heartbeat/release
-- Adapter protocol for integrating multiple coding agents
-- Trigger idempotency (`idempotency_key`) to prevent duplicate runs
-- Scheduled issue discovery + webhook-style comment execution
-- Project gate evaluation and gate-enforced status transitions
+Path: `plugins/openclaw-agentflow/`
+
+Exposed capabilities:
+
+- Commands: `agentflow.run`, `agentflow.help`
+- Tools: `agentflow_status`, `agentflow_capabilities`
+- Routes:
+  - `GET /agentflow/capabilities`
+  - `POST /agentflow/webhook/comment`
+  - `POST /agentflow/webhook/issues`
+  - `POST /agentflow/webhook/github`
 
 ## Quick Start
 
@@ -70,141 +66,49 @@ source .venv/bin/activate
 pip install -e .
 
 agentflow init --db ./data/agentflow.db
-agentflow create-project kthena --repo volcano-sh/kthena
-agentflow add-task --project kthena --title "controller partition revision bug" --priority 5 --impact 5 --effort 2 --source github --external-id 841
-agentflow next --project kthena
-agentflow claim-next --project kthena --agent codex-worker-1
-agentflow heartbeat 1 --agent codex-worker-1 --lease-minutes 30
-agentflow workers --project kthena
-agentflow release 1 --agent codex-worker-1 --to-status approved
-agentflow adapters
-agentflow run-once --project kthena --adapter mock --agent codex-worker-1
-agentflow run-batch --project kthena --adapter mock --agent-prefix worker --count 3
-agentflow runs --task-id 1
-agentflow run-steps 1
-agentflow triggers --project kthena
-agentflow gate-profile --project kthena
-agentflow discover-issues --project kthena --from-file ./examples/issues.json
-agentflow handle-comment --project kthena --payload-file ./examples/comment.json --adapter mock --agent codex-webhook
-agentflow board --project kthena
-agentflow dashboard --db ./data/agentflow.db --out ./dashboard.html
+agentflow create-project demo --repo your-org/your-repo
+agentflow add-task --project demo --title "example task" --priority 4 --impact 4 --effort 2
 agentflow serve --db ./data/agentflow.db --host 127.0.0.1 --port 8787
 ```
 
-## Implemented Now
+Open `http://127.0.0.1:8787`.
 
-- `run-once` / `run-batch` execution orchestration
-- Run inspection: `runs`, `run-steps`
-- Trigger inspection: `triggers`
-- Gate inspection: `gate-profile`
-- Scheduled discovery ingestion: `discover-issues`
-- Comment-event execution ingestion: `handle-comment`
-- Web console server: `serve`
+## Why This Project Is Attractive
 
-## Web Console
+- Lightweight by default: local SQLite, low ops burden
+- Plugin-first: can enhance existing agent stacks instead of replacing them
+- Stage-first UX: easier human control for multi-issue execution
+- Strong governance: transition validation + gate-aware promotion
+- Traceability: runs/triggers/status history/audit are first-class records
+- Multi-repo ready: one control plane for several repositories
 
-Start the control console:
+## Project Comparison (High-Level)
 
-```bash
-agentflow serve --db ./data/agentflow.db --host 127.0.0.1 --port 8787
-```
+| Project Type | Typical Focus | AgentFlow Difference |
+|---|---|---|
+| Full agent platforms | End-to-end hosted execution platform | AgentFlow is a lightweight control plugin, not a platform replacement |
+| Single-task coding agents | Solve one issue/task very well | AgentFlow focuses on project-level queueing, flow, and governance |
+| Generic workflow builders | Broad automation orchestration | AgentFlow is purpose-built for coding-task lifecycle and repository workflows |
+| Agent orchestration frameworks | Build custom multi-agent graphs | AgentFlow provides opinionated task/run/audit primitives out of the box |
 
-Enable webhook signature verification (recommended for public endpoints):
+## Roadmap (Planned)
 
-```bash
-agentflow serve --db ./data/agentflow.db --host 0.0.0.0 --port 8787 --github-webhook-secret "$GITHUB_WEBHOOK_SECRET"
-```
+### Phase 1: Universal Plugin Surface
 
-Then open:
+- Stable cross-agent action set (`pm.capabilities`, `pm.discover`, `pm.run`, `pm.move`, `pm.sync`)
+- Thin adapters for OpenClaw/Codex/Claude/Cursor ecosystems
 
-`http://127.0.0.1:8787`
+### Phase 2: Provider Hardening
 
-Current console capabilities:
+- Formal provider contract (discover/create/update/sync)
+- Better repository binding and multi-repo bootstrap experience
 
-- Task center list with search and status filter
-- Stage/source filter for issue collection and process routing
-- Stage board as top-level workflow view (supports drag-and-drop stage transition)
-- Semantic color coding for stage/status badges and board columns (improved readability)
-- Recent run stream with adapter/agent timeline
-- Task detail pane redesigned: concise flow info + PR detail panel + related links
-- Manual task flow transition (`pending/approved/in_progress/pr_ready/...`) with notes and optional force
-- Audit trail panel for all manual/automatic status transitions
-- One-click task execution (`POST /api/task/{id}/run`) for adapter-triggered run
+### Phase 3: Collaboration & Governance
 
-Webhook endpoints exposed by `serve`:
-
-- `POST /webhook/github/comment?project=<project>&adapter=mock&agent=bot`
-  - Payload: GitHub `issue_comment` style body
-  - Trigger command: comment body contains `/agentflow run`
-- `POST /webhook/github/issues?project=<project>`
-  - Payload: `{"issues":[...]}` or single issue object (`number`, `title`, optional `body`, `priority`, `impact`, `effort`)
-  - Behavior: ingest scheduled discovery issues
-- `POST /webhook/github?project=<project>&adapter=mock&agent=bot`
-  - Uses `X-GitHub-Event` for event routing (`issue_comment`, `pull_request_review_comment`, `issues`, `ping`)
-  - Optional signature header support: `X-Hub-Signature-256`
-
-Additional console APIs:
-
-- `GET /api/flow?project=<project>`: grouped tasks by flow stage (`collected/triaged/executing/review/done/blocked`)
-- `POST /api/task/<id>/move`: manual flow transition with payload `{"to_status":"approved","note":"..."}`.
-- `GET /api/audit?project=<project>&limit=30`: recent status transition audit events
-
-Flow safeguards in `/api/task/<id>/move` (when `force` is not set):
-
-- transition graph validation (blocks illegal jumps like `pending -> merged`)
-- review/done entry requires latest run with `status=passed` and `gate_passed=1`
-
-## Event-Driven Workflow (Current CLI Form)
-
-The current implementation accepts event payload files so you can wire cron/webhooks externally and forward JSON into AgentFlow.
-
-### 1. Scheduled Discovery Payload
-
-`issues.json` example:
-
-```json
-[
-  { "number": 841, "title": "controller partition revision bug", "priority": 5, "impact": 5, "effort": 2 },
-  { "number": 838, "title": "partition percentage support", "priority": 4, "impact": 4, "effort": 3 }
-]
-```
-
-Ingest:
-
-```bash
-agentflow discover-issues --project kthena --from-file ./issues.json
-```
-
-### 2. Comment Trigger Payload
-
-`comment.json` example:
-
-```json
-{
-  "comment": { "id": 5001, "body": "/agentflow run" },
-  "issue": { "number": 841, "title": "controller partition revision bug" }
-}
-```
-
-Handle:
-
-```bash
-agentflow handle-comment --project kthena --payload-file ./comment.json --adapter mock --agent codex-webhook
-```
-
-## Gate Profiles
-
-Gate profile storage is implemented in `gate_profiles` and enforced by `Runner` when commands are configured for a project.
-
-Current inspection command:
-
-```bash
-agentflow gate-profile --project kthena
-```
+- Policy presets (solo/strict/fast modes)
+- Stronger session continuity and task-context reuse across multi-round edits
 
 ## Testing
-
-Run all tests:
 
 ```bash
 cd /home/shawn/github/agentflow
@@ -213,90 +117,8 @@ PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 ## Plugin Packaging
 
-This repository now includes plugin skeletons:
-
 - OpenClaw native plugin: `plugins/openclaw-agentflow/`
-- Codex bundle sample: `plugins/bundles/codex/`
-- Claude bundle sample: `plugins/bundles/claude/`
-- Cursor bundle sample: `plugins/bundles/cursor/`
-
-### OpenClaw Native Plugin (local install)
-
-```bash
-openclaw plugins install ./plugins/openclaw-agentflow
-openclaw plugins enable agentflow
-openclaw gateway restart
-```
-
-Then configure under `plugins.entries.agentflow.config`, for example:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "agentflow": {
-        "enabled": true,
-        "config": {
-          "dbPath": "./data/agentflow.db",
-          "defaultProject": "kthena",
-          "defaultAdapter": "mock",
-          "defaultAgentName": "openclaw-agent"
-        }
-      }
-    }
-  }
-}
-```
-
-Exposed by the native plugin:
-
-- Command: `agentflow.run`
-- Command: `agentflow.help`
-- Tool: `agentflow_status`
-- Tool: `agentflow_capabilities`
-- HTTP route: `GET /agentflow/capabilities`
-- HTTP route: `POST /agentflow/webhook/comment`
-- HTTP route: `POST /agentflow/webhook/issues`
-- HTTP route: `POST /agentflow/webhook/github`
-
-### Publish to OpenClaw ecosystem
-
-1. Publish `plugins/openclaw-agentflow` as npm package (for example `@tweakzx/openclaw-agentflow`).
-2. Ensure package includes `openclaw.plugin.json`, `index.ts`, and README.
-3. Submit to OpenClaw Community/Marketplace listing after npm release.
-
-### Bundle compatibility for other agents
-
-Bundle manifests are provided as templates:
-
-- `.codex-plugin/plugin.json`
-- `.claude-plugin/plugin.json`
-- `.cursor-plugin/plugin.json`
-
-You can package each folder independently if you want dedicated distribution channels for different agent ecosystems.
-
-## Multi-Agent Integration
-
-This repository provides the core engine and CLI. Thin adapters map high-level commands for OpenClaw, Codex, Claude Code, or other coding agents:
-
-- `pm init`
-- `pm scan`
-- `pm next`
-- `pm board`
-- `pm sync`
-- `pm report`
-
-## Adapter Contract
-
-An adapter implements a normalized interface:
-
-- input: `Task + agent_name`
-- output: `AdapterResult(success, note, to_status)`
-
-This keeps AgentFlow focused on queueing and lifecycle management while each adapter handles provider-specific execution.
-
-## Status Values
-
-`pending -> approved -> in_progress -> pr_ready -> pr_open -> merged`
-
-Alternative terminal states: `skipped`, `blocked`.
+- Bundle templates:
+  - `plugins/bundles/codex/`
+  - `plugins/bundles/claude/`
+  - `plugins/bundles/cursor/`
