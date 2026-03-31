@@ -1,8 +1,8 @@
 {
   "id": "agentflow",
   "name": "AgentFlow",
-  "version": "0.1.0",
-  "description": "Task control-plane bridge: scheduled discovery + webhook comment execution + run observability.",
+  "version": "0.2.0",
+  "description": "Self-describing AgentFlow bridge for OpenClaw: capabilities discovery, queue execution, and webhook ingress.",
   "kind": "non-capability",
   "entry": "./index.ts",
   "configSchema": {

@@ -1,6 +1,6 @@
 {
   "name": "@tweakzx/openclaw-agentflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenClaw native plugin bridge for AgentFlow control-plane workflows",
   "type": "module",
   "main": "index.ts",

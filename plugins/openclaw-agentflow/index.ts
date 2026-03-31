@@ -11,12 +11,120 @@ type PluginConfig = {
   defaultAgentName?: string;
 };
 
+type CapabilityDoc = {
+  plugin: {
+    id: string;
+    name: string;
+    version: string;
+    summary: string;
+  };
+  defaults: {
+    dbPath: string;
+    project: string;
+    adapter: string;
+    agent: string;
+  };
+  commandHints: Array<{ id: string; when: string; example: string }>;
+  tools: Array<{ id: string; when: string; inputSchema: Record<string, unknown> }>;
+  httpRoutes: Array<{ method: string; path: string; when: string }>;
+  workflow: string[];
+};
+
 async function runAgentflow(args: string[]): Promise<{ stdout: string; stderr: string }> {
   const { stdout, stderr } = await execFileAsync("python3", ["-m", "agentflow.cli", ...args], {
     env: { ...process.env, PYTHONPATH: "src" },
     cwd: process.cwd()
   });
   return { stdout: String(stdout ?? ""), stderr: String(stderr ?? "") };
+}
+
+async function runWithTempJson(
+  prefix: string,
+  payload: unknown,
+  argsBuilder: (tmpPath: string) => string[]
+): Promise<{ stdout: string; stderr: string }> {
+  const fs = await import("node:fs/promises");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const tmp = path.join(os.tmpdir(), `${prefix}-${Date.now()}.json`);
+  try {
+    await fs.writeFile(tmp, JSON.stringify(payload), "utf-8");
+    return await runAgentflow(argsBuilder(tmp));
+  } finally {
+    await fs.rm(tmp, { force: true });
+  }
+}
+
+function buildCapabilitiesDoc(config: {
+  dbPath: string;
+  project: string;
+  adapter: string;
+  agent: string;
+}): CapabilityDoc {
+  return {
+    plugin: {
+      id: "agentflow",
+      name: "AgentFlow",
+      version: "0.2.0",
+      summary: "Stage-first task orchestration plugin with webhook and audit support."
+    },
+    defaults: {
+      dbPath: config.dbPath,
+      project: config.project,
+      adapter: config.adapter,
+      agent: config.agent
+    },
+    commandHints: [
+      {
+        id: "agentflow.run",
+        when: "Execute one claimable task from queue",
+        example: "agentflow.run({ project: 'kthena', adapter: 'mock', agent: 'openclaw-agent' })"
+      },
+      {
+        id: "agentflow.help",
+        when: "Read plugin usage guidance and capability map",
+        example: "agentflow.help({ mode: 'quickstart' })"
+      }
+    ],
+    tools: [
+      {
+        id: "agentflow_status",
+        when: "Read board queue summary text for a project",
+        inputSchema: { type: "object", properties: { project: { type: "string" } } }
+      },
+      {
+        id: "agentflow_capabilities",
+        when: "Discover plugin capabilities, routes, and recommended workflow",
+        inputSchema: { type: "object", properties: { mode: { type: "string", enum: ["quickstart", "full"] } } }
+      }
+    ],
+    httpRoutes: [
+      { method: "GET", path: "/agentflow/capabilities", when: "Capability discovery for agents" },
+      { method: "POST", path: "/agentflow/webhook/comment", when: "Issue comment trigger ingress" },
+      { method: "POST", path: "/agentflow/webhook/issues", when: "Scheduled discovery ingress" },
+      { method: "POST", path: "/agentflow/webhook/github", when: "Generic GitHub event ingress" }
+    ],
+    workflow: [
+      "discover: webhook/issues payload -> AgentFlow task ingestion",
+      "triage: inspect board/status with agentflow_status",
+      "execute: run one task with agentflow.run",
+      "observe: inspect run/audit from AgentFlow web console"
+    ]
+  };
+}
+
+function formatHelpText(doc: CapabilityDoc, mode: string): string {
+  if (mode === "quickstart") {
+    return [
+      "AgentFlow OpenClaw Plugin Quickstart",
+      `defaults: project=${doc.defaults.project}, adapter=${doc.defaults.adapter}, agent=${doc.defaults.agent}`,
+      "1) use tool agentflow_capabilities(mode=full) when agent is unsure",
+      "2) run queue task with command agentflow.run",
+      "3) inspect board text with tool agentflow_status(project=...)",
+      "4) send comment webhook to /agentflow/webhook/comment for event-driven run"
+    ].join("\n");
+  }
+  return JSON.stringify(doc, null, 2);
 }
 
 export default definePluginEntry({
@@ -28,6 +136,12 @@ export default definePluginEntry({
     const defaultProject = cfg.defaultProject || "default";
     const defaultAdapter = cfg.defaultAdapter || "mock";
     const defaultAgentName = cfg.defaultAgentName || "openclaw-agent";
+    const capabilitiesDoc = buildCapabilitiesDoc({
+      dbPath,
+      project: defaultProject,
+      adapter: defaultAdapter,
+      agent: defaultAgentName
+    });
 
     api.registerCommand?.({
       id: "agentflow.run",
@@ -51,6 +165,15 @@ export default definePluginEntry({
       }
     });
 
+    api.registerCommand?.({
+      id: "agentflow.help",
+      description: "Show AgentFlow capability guidance for agents",
+      async handler(input: { mode?: string }) {
+        const mode = input?.mode || "quickstart";
+        return { ok: true, output: formatHelpText(capabilitiesDoc, mode) };
+      }
+    });
+
     api.registerTool?.({
       id: "agentflow_status",
       description: "Read AgentFlow queue status",
@@ -67,6 +190,36 @@ export default definePluginEntry({
       }
     });
 
+    api.registerTool?.({
+      id: "agentflow_capabilities",
+      description: "Describe AgentFlow plugin capabilities, routes, and usage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["quickstart", "full"] }
+        }
+      },
+      async run(input: { mode?: string }) {
+        const mode = input?.mode || "full";
+        if (mode === "quickstart") {
+          return { content: formatHelpText(capabilitiesDoc, "quickstart") };
+        }
+        return { content: JSON.stringify(capabilitiesDoc, null, 2) };
+      }
+    });
+
+    api.registerHttpRoute?.({
+      method: "GET",
+      path: "/agentflow/capabilities",
+      async handler(req: any) {
+        const mode = req?.query?.mode === "quickstart" ? "quickstart" : "full";
+        if (mode === "quickstart") {
+          return { status: 200, body: { ok: true, text: formatHelpText(capabilitiesDoc, "quickstart") } };
+        }
+        return { status: 200, body: { ok: true, capabilities: capabilitiesDoc } };
+      }
+    });
+
     api.registerHttpRoute?.({
       method: "POST",
       path: "/agentflow/webhook/comment",
@@ -76,13 +229,7 @@ export default definePluginEntry({
         const adapter = payload?.adapter || defaultAdapter;
         const agent = payload?.agent || defaultAgentName;
 
-        const fs = await import("node:fs/promises");
-        const os = await import("node:os");
-        const path = await import("node:path");
-        const tmp = path.join(os.tmpdir(), `agentflow-comment-${Date.now()}.json`);
-        await fs.writeFile(tmp, JSON.stringify(payload), "utf-8");
-
-        const result = await runAgentflow([
+        const result = await runWithTempJson("agentflow-comment", payload, (tmp) => [
           "--db",
           dbPath,
           "handle-comment",
@@ -95,9 +242,77 @@ export default definePluginEntry({
           "--agent",
           agent
         ]);
-
-        await fs.rm(tmp, { force: true });
         return { status: 200, body: { ok: true, output: result.stdout || result.stderr } };
+      }
+    });
+
+    api.registerHttpRoute?.({
+      method: "POST",
+      path: "/agentflow/webhook/issues",
+      async handler(req: any) {
+        const payload = req?.body ?? {};
+        const project = payload?.project || defaultProject;
+        const normalized = Array.isArray(payload?.issues)
+          ? payload.issues
+          : Array.isArray(payload)
+            ? payload
+            : payload?.number
+              ? [payload]
+              : [];
+        const result = await runWithTempJson("agentflow-issues", normalized, (tmp) => [
+          "--db",
+          dbPath,
+          "discover-issues",
+          "--project",
+          project,
+          "--from-file",
+          tmp
+        ]);
+        return { status: 200, body: { ok: true, output: result.stdout || result.stderr } };
+      }
+    });
+
+    api.registerHttpRoute?.({
+      method: "POST",
+      path: "/agentflow/webhook/github",
+      async handler(req: any) {
+        const payload = req?.body ?? {};
+        const project = payload?.project || defaultProject;
+        const adapter = payload?.adapter || defaultAdapter;
+        const agent = payload?.agent || defaultAgentName;
+        const event =
+          String(req?.headers?.["x-github-event"] || req?.headers?.["X-GitHub-Event"] || "").toLowerCase();
+
+        if (event === "issues") {
+          const issue = payload?.issue && typeof payload.issue === "object" ? payload.issue : null;
+          const action = String(payload?.action || "");
+          const issues = issue && (action === "opened" || action === "reopened") ? [issue] : [];
+          const result = await runWithTempJson("agentflow-gh-issues", issues, (tmp) => [
+            "--db",
+            dbPath,
+            "discover-issues",
+            "--project",
+            project,
+            "--from-file",
+            tmp
+          ]);
+          return { status: 200, body: { ok: true, event, output: result.stdout || result.stderr } };
+        }
+
+        const result = await runWithTempJson("agentflow-gh-comment", payload, (tmp) => [
+          "--db",
+          dbPath,
+          "handle-comment",
+          "--project",
+          project,
+          "--payload-file",
+          tmp,
+          "--adapter",
+          adapter,
+          "--agent",
+          agent
+        ]);
+        return { status: 200, body: { ok: true, event: event || "unknown", output: result.stdout || result.stderr } };
       }
     });
   }
