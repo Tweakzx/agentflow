@@ -81,6 +81,15 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIn("status=passed", runs_out)
         self.assertIn("step=claim", steps_out)
 
+    def test_task_detail_audit_and_recent_runs_commands(self) -> None:
+        detail_out = self._run_cli("task-detail", "--task-id", str(self.task_id))
+        audit_out = self._run_cli("audit", "--project", "demo", "--limit", "5")
+        recent_out = self._run_cli("recent-runs", "--project", "demo", "--limit", "5")
+        self.assertIn('"task"', detail_out)
+        self.assertIn('"history"', detail_out)
+        self.assertIn("to=pending", audit_out)
+        self.assertIn("task=", recent_out)
+
     def test_triggers_and_gate_profile_commands(self) -> None:
         trig_out = self._run_cli("triggers", "--project", "demo")
         gate_out = self._run_cli("gate-profile", "--project", "demo")
@@ -121,6 +130,12 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(args.host, "127.0.0.1")
         self.assertEqual(args.port, 8787)
         self.assertIsNone(args.github_webhook_secret)
+
+    def test_sync_issues_parser(self) -> None:
+        args = _parser().parse_args(["sync-issues", "--project", "demo", "--repo", "owner/repo"])
+        self.assertEqual(args.command, "sync-issues")
+        self.assertEqual(args.project, "demo")
+        self.assertEqual(args.repo, "owner/repo")
 
 
 if __name__ == "__main__":

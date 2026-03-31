@@ -32,6 +32,7 @@ Stage Board + 任务详情（同图示意）：
 - 任务生命周期与排序：`next`、`claim-next`、`heartbeat`、`release`、`move`
 - 运行编排：`run-once`、`run-batch`（通过 adapter 协议）
 - 触发幂等与事件接入：`discover-issues`、`handle-comment`
+- 周期拉取 GitHub issue：`sync-issues`
 - 门禁执行：命令检查 + fail 时阻塞
 
 ### Web 控制台
@@ -43,15 +44,17 @@ Stage Board + 任务详情（同图示意）：
 - Recent Runs + Audit Trail 面板
 - API：
   - `GET /api/flow?project=<project>`
+  - `GET /api/events?project=<project>&last_event_id=<id>`（SSE 流式）
   - `GET /api/audit?project=<project>&limit=30`
   - `POST /api/task/<id>/run`
+  - `POST /api/task/<id>/progress`
   - `POST /api/task/<id>/move`
 
 ### Webhook 入口（控制台）
 
-- `POST /webhook/github/comment?project=<project>&adapter=mock&agent=bot`
+- `POST /webhook/github/comment?project=<project>&adapter=openclaw&agent=bot`
 - `POST /webhook/github/issues?project=<project>`
-- `POST /webhook/github?project=<project>&adapter=mock&agent=bot`
+- `POST /webhook/github?project=<project>&adapter=openclaw&agent=bot`
 - 可选签名校验：`X-Hub-Signature-256`
 
 ### OpenClaw 原生插件
@@ -60,8 +63,8 @@ Stage Board + 任务详情（同图示意）：
 
 已暴露能力：
 
-- Commands：`agentflow.run`、`agentflow.help`
-- Tools：`agentflow_status`、`agentflow_capabilities`
+- Commands：`agentflow.run`、`agentflow.create`、`agentflow.move`、`agentflow.detail`、`agentflow.audit`、`agentflow.help`
+- Tools：`agentflow_status`、`agentflow_capabilities`、`agentflow_create_task`、`agentflow_move_task`、`agentflow_task_detail`、`agentflow_recent_runs`、`agentflow_audit`
 - Routes：
   - `GET /agentflow/capabilities`
   - `POST /agentflow/webhook/comment`

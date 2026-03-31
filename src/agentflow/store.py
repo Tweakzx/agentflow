@@ -28,6 +28,7 @@ class Task:
     id: int
     project: str
     title: str
+    description: str | None
     status: str
     priority: int
     impact: int
@@ -368,7 +369,7 @@ class Store:
 
     def _base_task_sql(self) -> str:
         return """
-            SELECT t.id, p.name AS project, t.title, t.status, t.priority, t.impact, t.effort,
+            SELECT t.id, p.name AS project, t.title, t.description, t.status, t.priority, t.impact, t.effort,
                    t.source, t.external_id, t.pr_url, t.assigned_agent, t.lease_until
             FROM tasks t
             JOIN projects p ON p.id = t.project_id

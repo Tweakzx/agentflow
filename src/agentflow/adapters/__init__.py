@@ -1,4 +1,4 @@
-from .base import AdapterResult, AgentAdapter
+from .base import AdapterContext, AdapterResult, AgentAdapter
 from .registry import AdapterRegistry
 
-__all__ = ["AdapterResult", "AgentAdapter", "AdapterRegistry"]
+__all__ = ["AdapterContext", "AdapterResult", "AgentAdapter", "AdapterRegistry"]

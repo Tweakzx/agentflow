@@ -21,7 +21,7 @@
       "defaultAdapter": {
         "type": "string",
         "description": "Adapter used for event-driven run execution",
-        "default": "mock"
+        "default": "openclaw"
       },
       "defaultAgentName": {
         "type": "string",

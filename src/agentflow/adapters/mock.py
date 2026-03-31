@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from agentflow.adapters.base import AdapterResult
-from agentflow.store import Task
+from agentflow.adapters.base import AdapterContext, AdapterResult
 
 
 class MockAdapter:
@@ -9,7 +8,8 @@ class MockAdapter:
 
     name = "mock"
 
-    def execute(self, task: Task, agent_name: str) -> AdapterResult:
+    def execute(self, context: AdapterContext, agent_name: str) -> AdapterResult:
+        task = context.task
         title = task.title.lower()
         if "blocked" in title or "investigate" in title:
             return AdapterResult(success=False, note=f"{agent_name} requires human input", to_status="blocked")

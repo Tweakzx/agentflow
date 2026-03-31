@@ -100,6 +100,32 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertEqual(status2, 200)
         self.assertTrue(out2["duplicate"])
 
+    def test_progress_endpoint_appends_run_step(self) -> None:
+        self._start_server()
+        claimed = self.store.claim_task(self.task_id, "demo", "bot-a", lease_minutes=20)
+        self.assertIsNotNone(claimed)
+        run_id = self.store.create_run(
+            task_id=self.task_id,
+            project="demo",
+            trigger_type="manual",
+            trigger_ref="runner:mock",
+            adapter="mock",
+            agent_name="bot-a",
+            idempotency_key="progress-1",
+        )
+
+        status, out = self._post_json(
+            f"/api/task/{self.task_id}/progress",
+            {"agent": "bot-a", "step": "running-tests", "detail": "3/10 passed", "status": "in_progress"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(out["ok"])
+        self.assertEqual(run_id, out["run_id"])
+
+        steps = self.store.list_run_steps(run_id)
+        self.assertEqual("running-tests", steps[-1]["step_name"])
+        self.assertIn("3/10", steps[-1]["log_excerpt"])
+
     def test_webhook_signature_required_when_secret_enabled(self) -> None:
         secret = "top-secret"
         self._start_server(secret=secret)

@@ -78,7 +78,27 @@ function buildCapabilitiesDoc(config: {
       {
         id: "agentflow.run",
         when: "Execute one claimable task from queue",
-        example: "agentflow.run({ project: 'kthena', adapter: 'mock', agent: 'openclaw-agent' })"
+        example: "agentflow.run({ project: 'kthena', adapter: 'openclaw', agent: 'openclaw-agent' })"
+      },
+      {
+        id: "agentflow.create",
+        when: "Create one task in AgentFlow",
+        example: "agentflow.create({ project: 'kthena', title: 'fix flaky gate' })"
+      },
+      {
+        id: "agentflow.move",
+        when: "Move one task to a target status",
+        example: "agentflow.move({ task_id: 12, to_status: 'approved', note: 'triaged' })"
+      },
+      {
+        id: "agentflow.detail",
+        when: "Inspect one task with runs + history",
+        example: "agentflow.detail({ task_id: 12 })"
+      },
+      {
+        id: "agentflow.audit",
+        when: "Read recent status transition events",
+        example: "agentflow.audit({ project: 'kthena', limit: 20 })"
       },
       {
         id: "agentflow.help",
@@ -96,6 +116,64 @@ function buildCapabilitiesDoc(config: {
         id: "agentflow_capabilities",
         when: "Discover plugin capabilities, routes, and recommended workflow",
         inputSchema: { type: "object", properties: { mode: { type: "string", enum: ["quickstart", "full"] } } }
+      },
+      {
+        id: "agentflow_create_task",
+        when: "Create a task via AgentFlow CLI",
+        inputSchema: {
+          type: "object",
+          required: ["project", "title"],
+          properties: {
+            project: { type: "string" },
+            title: { type: "string" },
+            description: { type: "string" },
+            priority: { type: "number" },
+            impact: { type: "number" },
+            effort: { type: "number" },
+            source: { type: "string" },
+            external_id: { type: "string" }
+          }
+        }
+      },
+      {
+        id: "agentflow_move_task",
+        when: "Move a task status via AgentFlow CLI",
+        inputSchema: {
+          type: "object",
+          required: ["task_id", "to_status"],
+          properties: {
+            task_id: { type: "number" },
+            to_status: { type: "string" },
+            note: { type: "string" }
+          }
+        }
+      },
+      {
+        id: "agentflow_task_detail",
+        when: "Read one task detail with runs/history",
+        inputSchema: { type: "object", required: ["task_id"], properties: { task_id: { type: "number" } } }
+      },
+      {
+        id: "agentflow_recent_runs",
+        when: "Read recent runs in a project",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project: { type: "string" },
+            limit: { type: "number" }
+          }
+        }
+      },
+      {
+        id: "agentflow_audit",
+        when: "Read audit/status transition events",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project: { type: "string" },
+            limit: { type: "number" }
+          }
+        }
       }
     ],
     httpRoutes: [
@@ -134,7 +212,7 @@ export default definePluginEntry({
     const cfg: PluginConfig = (api?.config ?? {}) as PluginConfig;
     const dbPath = cfg.dbPath || "./data/agentflow.db";
     const defaultProject = cfg.defaultProject || "default";
-    const defaultAdapter = cfg.defaultAdapter || "mock";
+    const defaultAdapter = cfg.defaultAdapter || "openclaw";
     const defaultAgentName = cfg.defaultAgentName || "openclaw-agent";
     const capabilitiesDoc = buildCapabilitiesDoc({
       dbPath,
@@ -160,6 +238,80 @@ export default definePluginEntry({
           adapter,
           "--agent",
           agent
+        ]);
+        return { ok: true, output: result.stdout || result.stderr };
+      }
+    });
+
+    api.registerCommand?.({
+      id: "agentflow.create",
+      description: "Create one AgentFlow task",
+      async handler(input: {
+        project?: string;
+        title?: string;
+        description?: string;
+        priority?: number;
+        impact?: number;
+        effort?: number;
+        source?: string;
+        external_id?: string;
+      }) {
+        if (!input?.title) {
+          return { ok: false, output: "title is required" };
+        }
+        const project = input?.project || defaultProject;
+        const args = ["--db", dbPath, "add-task", "--project", project, "--title", String(input.title)];
+        if (input.description) args.push("--description", String(input.description));
+        if (input.priority !== undefined) args.push("--priority", String(input.priority));
+        if (input.impact !== undefined) args.push("--impact", String(input.impact));
+        if (input.effort !== undefined) args.push("--effort", String(input.effort));
+        if (input.source) args.push("--source", String(input.source));
+        if (input.external_id) args.push("--external-id", String(input.external_id));
+        const result = await runAgentflow(args);
+        return { ok: true, output: result.stdout || result.stderr };
+      }
+    });
+
+    api.registerCommand?.({
+      id: "agentflow.move",
+      description: "Move one AgentFlow task to a target status",
+      async handler(input: { task_id?: number; to_status?: string; note?: string }) {
+        if (!Number.isFinite(Number(input?.task_id)) || !input?.to_status) {
+          return { ok: false, output: "task_id and to_status are required" };
+        }
+        const args = ["--db", dbPath, "move", String(Number(input.task_id)), String(input.to_status)];
+        if (input.note) args.push("--note", String(input.note));
+        const result = await runAgentflow(args);
+        return { ok: true, output: result.stdout || result.stderr };
+      }
+    });
+
+    api.registerCommand?.({
+      id: "agentflow.detail",
+      description: "Get task detail with runs and history",
+      async handler(input: { task_id?: number }) {
+        if (!Number.isFinite(Number(input?.task_id))) {
+          return { ok: false, output: "task_id is required" };
+        }
+        const result = await runAgentflow(["--db", dbPath, "task-detail", "--task-id", String(Number(input.task_id))]);
+        return { ok: true, output: result.stdout || result.stderr };
+      }
+    });
+
+    api.registerCommand?.({
+      id: "agentflow.audit",
+      description: "List recent status transition audit events",
+      async handler(input: { project?: string; limit?: number }) {
+        const project = input?.project || defaultProject;
+        const limit = Number.isFinite(Number(input?.limit)) ? Number(input?.limit) : 30;
+        const result = await runAgentflow([
+          "--db",
+          dbPath,
+          "audit",
+          "--project",
+          project,
+          "--limit",
+          String(Math.max(1, Math.min(200, limit)))
         ]);
         return { ok: true, output: result.stdout || result.stderr };
       }
@@ -205,6 +357,131 @@ export default definePluginEntry({
           return { content: formatHelpText(capabilitiesDoc, "quickstart") };
         }
         return { content: JSON.stringify(capabilitiesDoc, null, 2) };
+      }
+    });
+
+    api.registerTool?.({
+      id: "agentflow_create_task",
+      description: "Create a task in AgentFlow",
+      inputSchema: {
+        type: "object",
+        required: ["project", "title"],
+        properties: {
+          project: { type: "string" },
+          title: { type: "string" },
+          description: { type: "string" },
+          priority: { type: "number" },
+          impact: { type: "number" },
+          effort: { type: "number" },
+          source: { type: "string" },
+          external_id: { type: "string" }
+        }
+      },
+      async run(input: {
+        project: string;
+        title: string;
+        description?: string;
+        priority?: number;
+        impact?: number;
+        effort?: number;
+        source?: string;
+        external_id?: string;
+      }) {
+        const args = ["--db", dbPath, "add-task", "--project", input.project, "--title", input.title];
+        if (input.description) args.push("--description", String(input.description));
+        if (input.priority !== undefined) args.push("--priority", String(input.priority));
+        if (input.impact !== undefined) args.push("--impact", String(input.impact));
+        if (input.effort !== undefined) args.push("--effort", String(input.effort));
+        if (input.source) args.push("--source", String(input.source));
+        if (input.external_id) args.push("--external-id", String(input.external_id));
+        const result = await runAgentflow(args);
+        return { content: result.stdout || result.stderr };
+      }
+    });
+
+    api.registerTool?.({
+      id: "agentflow_move_task",
+      description: "Move task to another status",
+      inputSchema: {
+        type: "object",
+        required: ["task_id", "to_status"],
+        properties: {
+          task_id: { type: "number" },
+          to_status: { type: "string" },
+          note: { type: "string" }
+        }
+      },
+      async run(input: { task_id: number; to_status: string; note?: string }) {
+        const args = ["--db", dbPath, "move", String(input.task_id), String(input.to_status)];
+        if (input.note) args.push("--note", String(input.note));
+        const result = await runAgentflow(args);
+        return { content: result.stdout || result.stderr };
+      }
+    });
+
+    api.registerTool?.({
+      id: "agentflow_task_detail",
+      description: "Read one task detail",
+      inputSchema: {
+        type: "object",
+        required: ["task_id"],
+        properties: { task_id: { type: "number" } }
+      },
+      async run(input: { task_id: number }) {
+        const result = await runAgentflow(["--db", dbPath, "task-detail", "--task-id", String(input.task_id)]);
+        return { content: result.stdout || result.stderr };
+      }
+    });
+
+    api.registerTool?.({
+      id: "agentflow_recent_runs",
+      description: "Read recent runs for a project",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project: { type: "string" },
+          limit: { type: "number" }
+        }
+      },
+      async run(input: { project?: string; limit?: number }) {
+        const project = input?.project || defaultProject;
+        const limit = Number.isFinite(Number(input?.limit)) ? Number(input?.limit) : 20;
+        const result = await runAgentflow([
+          "--db",
+          dbPath,
+          "recent-runs",
+          "--project",
+          project,
+          "--limit",
+          String(Math.max(1, Math.min(200, limit)))
+        ]);
+        return { content: result.stdout || result.stderr };
+      }
+    });
+
+    api.registerTool?.({
+      id: "agentflow_audit",
+      description: "Read recent status transition events",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project: { type: "string" },
+          limit: { type: "number" }
+        }
+      },
+      async run(input: { project?: string; limit?: number }) {
+        const project = input?.project || defaultProject;
+        const limit = Number.isFinite(Number(input?.limit)) ? Number(input?.limit) : 30;
+        const result = await runAgentflow([
+          "--db",
+          dbPath,
+          "audit",
+          "--project",
+          project,
+          "--limit",
+          String(Math.max(1, Math.min(200, limit)))
+        ]);
+        return { content: result.stdout || result.stderr };
       }
     });
 

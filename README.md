@@ -32,6 +32,7 @@ Stage Board + Task Detail demo (illustrative, single image):
 - Task lifecycle and scoring (`next`, `claim-next`, `heartbeat`, `release`, `move`)
 - Run orchestration (`run-once`, `run-batch`) with adapter protocol
 - Trigger idempotency and event ingestion (`discover-issues`, `handle-comment`)
+- Periodic GitHub pull ingestion (`sync-issues`)
 - Gate enforcement with command checks and blocked-on-fail behavior
 
 ### Web Console
@@ -43,15 +44,17 @@ Stage Board + Task Detail demo (illustrative, single image):
 - Recent runs + audit trail panels
 - APIs:
   - `GET /api/flow?project=<project>`
+  - `GET /api/events?project=<project>&last_event_id=<id>` (SSE stream)
   - `GET /api/audit?project=<project>&limit=30`
   - `POST /api/task/<id>/run`
+  - `POST /api/task/<id>/progress`
   - `POST /api/task/<id>/move`
 
 ### Webhook Endpoints (Console)
 
-- `POST /webhook/github/comment?project=<project>&adapter=mock&agent=bot`
+- `POST /webhook/github/comment?project=<project>&adapter=openclaw&agent=bot`
 - `POST /webhook/github/issues?project=<project>`
-- `POST /webhook/github?project=<project>&adapter=mock&agent=bot`
+- `POST /webhook/github?project=<project>&adapter=openclaw&agent=bot`
 - Optional signature verification: `X-Hub-Signature-256`
 
 ### OpenClaw Native Plugin
@@ -60,8 +63,8 @@ Path: `plugins/openclaw-agentflow/`
 
 Exposed capabilities:
 
-- Commands: `agentflow.run`, `agentflow.help`
-- Tools: `agentflow_status`, `agentflow_capabilities`
+- Commands: `agentflow.run`, `agentflow.create`, `agentflow.move`, `agentflow.detail`, `agentflow.audit`, `agentflow.help`
+- Tools: `agentflow_status`, `agentflow_capabilities`, `agentflow_create_task`, `agentflow_move_task`, `agentflow_task_detail`, `agentflow_recent_runs`, `agentflow_audit`
 - Routes:
   - `GET /agentflow/capabilities`
   - `POST /agentflow/webhook/comment`

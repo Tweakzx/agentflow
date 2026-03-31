@@ -23,7 +23,7 @@ In OpenClaw config:
         "config": {
           "dbPath": "./data/agentflow.db",
           "defaultProject": "kthena",
-          "defaultAdapter": "mock",
+          "defaultAdapter": "openclaw",
           "defaultAgentName": "openclaw-agent"
         }
       }
@@ -35,13 +35,33 @@ In OpenClaw config:
 ## Exposed capabilities
 
 - Command: `agentflow.run`
+- Command: `agentflow.create`
+- Command: `agentflow.move`
+- Command: `agentflow.detail`
+- Command: `agentflow.audit`
 - Command: `agentflow.help`
 - Tool: `agentflow_status`
 - Tool: `agentflow_capabilities`
+- Tool: `agentflow_create_task`
+- Tool: `agentflow_move_task`
+- Tool: `agentflow_task_detail`
+- Tool: `agentflow_recent_runs`
+- Tool: `agentflow_audit`
 - HTTP route: `GET /agentflow/capabilities`
 - HTTP route: `POST /agentflow/webhook/comment`
 - HTTP route: `POST /agentflow/webhook/issues`
 - HTTP route: `POST /agentflow/webhook/github`
+
+## Real Adapter Prerequisites
+
+`defaultAdapter` is `openclaw`, which uses AgentFlow's `OpenClawAdapter` under the hood.
+
+Optional environment variables for the adapter process:
+
+- `AGENTFLOW_OPENCLAW_GATEWAY` (default: `http://127.0.0.1:3000`)
+- `AGENTFLOW_OPENCLAW_RUNTIME` (default: `acp`)
+- `AGENTFLOW_OPENCLAW_TIMEOUT_SEC` (default: `1800`)
+- `AGENTFLOW_OPENCLAW_TOKEN` (optional bearer token)
 
 ## Agent Discovery Pattern (OpenClaw style)
 

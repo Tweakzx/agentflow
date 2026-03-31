@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from .adapters.registry import AdapterRegistry
@@ -83,6 +86,17 @@ def _parser() -> argparse.ArgumentParser:
     p_runs = sub.add_parser("runs", help="List runs for a task")
     p_runs.add_argument("--task-id", required=True, type=int)
 
+    p_detail = sub.add_parser("task-detail", help="Show one task with runs and status history (JSON)")
+    p_detail.add_argument("--task-id", required=True, type=int)
+
+    p_recent_runs = sub.add_parser("recent-runs", help="List recent runs for a project")
+    p_recent_runs.add_argument("--project", required=True)
+    p_recent_runs.add_argument("--limit", type=int, default=20)
+
+    p_audit = sub.add_parser("audit", help="List recent status transition events for a project")
+    p_audit.add_argument("--project", required=True)
+    p_audit.add_argument("--limit", type=int, default=50)
+
     p_run_steps = sub.add_parser("run-steps", help="List run steps")
     p_run_steps.add_argument("run_id", type=int)
 
@@ -111,6 +125,17 @@ def _parser() -> argparse.ArgumentParser:
     p_discovery.add_argument("--project", required=True)
     p_discovery.add_argument("--from-file", required=True, dest="from_file")
 
+    p_sync_issues = sub.add_parser("sync-issues", help="Fetch GitHub issues and ingest into AgentFlow")
+    p_sync_issues.add_argument("--project", required=True)
+    p_sync_issues.add_argument("--repo", required=True, help="GitHub repo in owner/name form")
+    p_sync_issues.add_argument("--state", default="open", choices=["open", "closed", "all"])
+    p_sync_issues.add_argument("--label", help="Optional GitHub label filter")
+    p_sync_issues.add_argument("--limit", type=int, default=20)
+    p_sync_issues.add_argument("--priority", type=int, default=4)
+    p_sync_issues.add_argument("--impact", type=int, default=4)
+    p_sync_issues.add_argument("--effort", type=int, default=2)
+    p_sync_issues.add_argument("--token", help="GitHub token (or use GITHUB_TOKEN env)")
+
     p_comment = sub.add_parser("handle-comment", help="Handle GitHub PR/issue comment webhook payload")
     p_comment.add_argument("--project", required=True)
     p_comment.add_argument("--payload-file", required=True)
@@ -132,6 +157,12 @@ def _print_tasks(tasks) -> None:
         print(
             f"{t.id:<3} {t.project:<8} {t.status:<11}  {t.priority:<3} {t.impact:<3} {t.effort:<3} {t.score:<5.1f}  {agent:<12}  {lease:<19}  {t.title}"
         )
+
+
+def _task_to_dict(task) -> dict:
+    if hasattr(task, "__dataclass_fields__"):
+        return dict(task.__dict__)
+    return dict(task)
 
 
 def main() -> None:
@@ -244,6 +275,43 @@ def main() -> None:
             )
         return
 
+    if args.command == "task-detail":
+        task = store.get_task(args.task_id)
+        if task is None:
+            print("(task not found)")
+            return
+        runs = [dict(r) for r in store.list_runs(args.task_id)]
+        history = [dict(h) for h in store.list_status_history(args.task_id)]
+        for run in runs:
+            run["steps"] = [dict(s) for s in store.list_run_steps(int(run["id"]))]
+        payload = {"task": _task_to_dict(task), "runs": runs, "history": history}
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "recent-runs":
+        rows = store.list_recent_runs(args.project, limit=max(1, min(200, int(args.limit))))
+        if not rows:
+            print("(no runs)")
+            return
+        for row in rows:
+            print(
+                f"{row['id']} task={row['task_id']} status={row['status']} "
+                f"gate_passed={row['gate_passed']} adapter={row['adapter']} agent={row['agent_name']}"
+            )
+        return
+
+    if args.command == "audit":
+        rows = store.list_recent_status_history(args.project, limit=max(1, min(200, int(args.limit))))
+        if not rows:
+            print("(no events)")
+            return
+        for row in rows:
+            print(
+                f"{row['id']} task={row['task_id']} from={row['from_status'] or '-'} "
+                f"to={row['to_status']} note={row['note'] or '-'}"
+            )
+        return
+
     if args.command == "run-steps":
         rows = store.list_run_steps(args.run_id)
         if not rows:
@@ -316,6 +384,45 @@ def main() -> None:
             raise ValueError("discover-issues payload must be a JSON array")
         result = discovery.ingest_issues(args.project, payload)
         print(f"created={result.created} skipped={result.skipped}")
+        return
+
+    if args.command == "sync-issues":
+        limit = max(1, min(100, int(args.limit)))
+        token = args.token or os.environ.get("GITHUB_TOKEN")
+        query = {"state": args.state, "per_page": str(limit), "sort": "created", "direction": "desc"}
+        if args.label:
+            query["labels"] = args.label
+        url = f"https://api.github.com/repos/{args.repo}/issues?{urllib.parse.urlencode(query)}"
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "agentflow-sync-issues"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(payload, list):
+            raise ValueError("GitHub issues response must be a JSON array")
+        normalized = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            if "pull_request" in item:
+                continue
+            number = item.get("number")
+            title = item.get("title")
+            if not number or not title:
+                continue
+            normalized.append(
+                {
+                    "number": number,
+                    "title": title,
+                    "body": item.get("body"),
+                    "priority": args.priority,
+                    "impact": args.impact,
+                    "effort": args.effort,
+                }
+            )
+        result = discovery.ingest_issues(args.project, normalized)
+        print(f"fetched={len(normalized)} created={result.created} skipped={result.skipped}")
         return
 
     if args.command == "handle-comment":

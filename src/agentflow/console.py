@@ -4,6 +4,8 @@ import hashlib
 import hmac
 import json
 import re
+import threading
+import time
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -207,6 +209,7 @@ INDEX_HTML = """<!doctype html>
     <div class=\"toolbar\">
       <label class=\"sub\">Project</label>
       <select id=\"projectSelect\"></select>
+      <span class=\"badge\" id=\"connState\">Stream: OFF</span>
       <button class=\"secondary\" onclick=\"refreshAll()\">Refresh</button>
       <button class=\"secondary\" id=\"autoBtn\" onclick=\"toggleAuto()\">Auto: OFF</button>
     </div>
@@ -256,6 +259,10 @@ INDEX_HTML = """<!doctype html>
       filtered: [],
       selectedTask: null,
       autoTimer: null,
+      fallbackTimer: null,
+      eventSource: null,
+      streamReconnectTimer: null,
+      streamLastEventId: 0,
       recentRuns: [],
       audit: [],
     };
@@ -301,7 +308,10 @@ INDEX_HTML = """<!doctype html>
       const current = sel.value;
       sel.innerHTML = state.projects.map(p => `<option value=\"${p}\">${p}</option>`).join('');
       if (current && state.projects.includes(current)) sel.value = current;
-      sel.onchange = refreshAll;
+      sel.onchange = async () => {
+        await refreshAll();
+        restartStream();
+      };
     }
 
     function currentProject() {
@@ -543,6 +553,75 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
+    function setConnState(text) {
+      const el = document.getElementById('connState');
+      if (el) el.textContent = text;
+    }
+
+    function stopFallbackPolling() {
+      if (state.fallbackTimer) {
+        clearInterval(state.fallbackTimer);
+        state.fallbackTimer = null;
+      }
+    }
+
+    function startFallbackPolling() {
+      if (state.fallbackTimer) return;
+      state.fallbackTimer = setInterval(() => {
+        refreshAll().catch(err => console.error(err));
+      }, 15000);
+    }
+
+    function closeStream() {
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+      if (state.streamReconnectTimer) {
+        clearTimeout(state.streamReconnectTimer);
+        state.streamReconnectTimer = null;
+      }
+    }
+
+    async function onStreamEvent(raw) {
+      let evt = null;
+      try {
+        evt = JSON.parse(raw.data || '{}');
+      } catch (_err) {
+        return;
+      }
+      if (evt && Number.isFinite(Number(evt.id))) {
+        state.streamLastEventId = Math.max(state.streamLastEventId, Number(evt.id));
+      }
+      await refreshAll();
+    }
+
+    function restartStream() {
+      closeStream();
+      const project = currentProject();
+      if (!project) return;
+      const url = `/api/events?project=${encodeURIComponent(project)}&last_event_id=${state.streamLastEventId || 0}`;
+      const es = new EventSource(url);
+      state.eventSource = es;
+
+      es.onopen = () => {
+        stopFallbackPolling();
+        setConnState('Stream: LIVE');
+      };
+      es.onmessage = (ev) => {
+        onStreamEvent(ev).catch(err => console.error(err));
+      };
+      es.onerror = () => {
+        setConnState('Stream: RETRY');
+        startFallbackPolling();
+        if (state.streamReconnectTimer) return;
+        state.streamReconnectTimer = setTimeout(() => {
+          state.streamReconnectTimer = null;
+          restartStream();
+        }, 3000);
+      };
+    }
+
     function toggleAuto() {
       const btn = document.getElementById('autoBtn');
       if (state.autoTimer) {
@@ -560,7 +639,13 @@ INDEX_HTML = """<!doctype html>
     async function boot() {
       await loadProjects();
       await refreshAll();
+      restartStream();
     }
+
+    window.addEventListener('beforeunload', () => {
+      closeStream();
+      stopFallbackPolling();
+    });
 
     boot().catch(err => {
       document.body.innerHTML = `<pre class=\"err\">Failed to load console: ${err}</pre>`;
@@ -642,6 +727,75 @@ def _build_task_links(task: dict[str, Any], repo_full_name: str | None, runs: li
     }
 
 
+class EventStreamBroker:
+    def __init__(self, *, max_events: int = 400) -> None:
+        self._max_events = max(50, max_events)
+        self._cond = threading.Condition()
+        self._events: list[dict[str, Any]] = []
+        self._next_id = 1
+
+    def publish(self, project: str, event: str, payload: dict[str, Any]) -> int:
+        with self._cond:
+            event_id = self._next_id
+            self._next_id += 1
+            self._events.append(
+                {
+                    "id": event_id,
+                    "project": project,
+                    "event": event,
+                    "payload": payload,
+                    "ts": int(time.time()),
+                }
+            )
+            if len(self._events) > self._max_events:
+                self._events = self._events[-self._max_events :]
+            self._cond.notify_all()
+            return event_id
+
+    def since(self, project: str, last_event_id: int) -> list[dict[str, Any]]:
+        with self._cond:
+            return [e for e in self._events if e["project"] == project and int(e["id"]) > last_event_id]
+
+    def wait_for(self, project: str, last_event_id: int, timeout_sec: float = 15.0) -> list[dict[str, Any]]:
+        deadline = time.time() + max(0.1, timeout_sec)
+        with self._cond:
+            while True:
+                events = [e for e in self._events if e["project"] == project and int(e["id"]) > last_event_id]
+                if events:
+                    return events
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return []
+                self._cond.wait(timeout=remaining)
+
+
+def _latest_running_run_id(store: Store, task_id: int) -> int | None:
+    for run in store.list_runs(task_id):
+        if str(run["status"]) == "running":
+            return int(run["id"])
+    return None
+
+
+def _record_task_progress(
+    store: Store,
+    *,
+    task_id: int,
+    agent: str,
+    step: str,
+    detail: str,
+    status: str,
+    lease_minutes: int,
+) -> dict[str, Any]:
+    run_id = _latest_running_run_id(store, task_id)
+    if run_id is None:
+        return {"ok": False, "error": "no running run for task"}
+    heartbeat_ok = store.heartbeat(task_id, agent, lease_minutes=lease_minutes)
+    if not heartbeat_ok:
+        return {"ok": False, "error": "heartbeat ignored (not owner or not in_progress)"}
+    step_id = store.append_run_step(run_id, step, status, detail or None)
+    return {"ok": True, "run_id": run_id, "step_id": step_id, "heartbeat_ok": heartbeat_ok}
+
+
 def _validate_manual_transition(from_status: str, to_status: str) -> str | None:
     allowed = {
         "pending": {"approved", "blocked", "skipped"},
@@ -668,6 +822,8 @@ def _build_handler(
     webhook: GithubCommentWebhookService,
     github_webhook_secret: str | None,
 ):
+    broker = EventStreamBroker()
+
     class ConsoleHandler(BaseHTTPRequestHandler):
         server_version = "AgentFlowConsole/0.2"
 
@@ -759,6 +915,55 @@ def _build_handler(
                 self._send_json({"project": project, "stages": grouped})
                 return
 
+            if path == "/api/events":
+                project = query.get("project", [None])[0]
+                if not project:
+                    self._send_json({"error": "project is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                raw_last = query.get("last_event_id", [self.headers.get("Last-Event-ID", "0")])[0]
+                try:
+                    last_event_id = max(0, int(str(raw_last)))
+                except ValueError:
+                    last_event_id = 0
+
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+
+                def emit(event_item: dict[str, Any]) -> None:
+                    payload = {
+                        "id": int(event_item["id"]),
+                        "project": event_item["project"],
+                        "event": event_item["event"],
+                        "payload": event_item["payload"],
+                        "ts": int(event_item["ts"]),
+                    }
+                    self.wfile.write(f"id: {payload['id']}\n".encode("utf-8"))
+                    self.wfile.write(f"event: {payload['event']}\n".encode("utf-8"))
+                    self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
+
+                try:
+                    backlog = broker.since(project, last_event_id)
+                    for event_item in backlog:
+                        emit(event_item)
+                        last_event_id = int(event_item["id"])
+                    self.wfile.flush()
+
+                    while True:
+                        events = broker.wait_for(project, last_event_id, timeout_sec=15.0)
+                        if not events:
+                            self.wfile.write(b": keep-alive\n\n")
+                            self.wfile.flush()
+                            continue
+                        for event_item in events:
+                            emit(event_item)
+                            last_event_id = int(event_item["id"])
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+
             if path == "/api/audit":
                 project = query.get("project", [None])[0]
                 if not project:
@@ -818,6 +1023,71 @@ def _build_handler(
             query = parse_qs(parsed.query)
             body = self._read_body()
 
+            if path.startswith("/api/task/") and path.endswith("/progress"):
+                parts = path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._send_json({"error": "invalid path"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    task_id = int(parts[2])
+                except ValueError:
+                    self._send_json({"error": "invalid task id"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                payload = self._parse_json(body)
+                task = store.get_task(task_id)
+                if task is None:
+                    self._send_json({"error": "task not found"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                agent = str(payload.get("agent") or task.assigned_agent or "").strip()
+                if not agent:
+                    self._send_json({"error": "agent is required"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                step = str(payload.get("step") or "progress").strip() or "progress"
+                detail = str(payload.get("detail") or "").strip()
+                step_status = str(payload.get("status") or "in_progress").strip() or "in_progress"
+                raw_lease = payload.get("lease_minutes", 30)
+                try:
+                    lease_minutes = max(1, min(240, int(raw_lease)))
+                except (TypeError, ValueError):
+                    lease_minutes = 30
+                out = _record_task_progress(
+                    store,
+                    task_id=task_id,
+                    agent=agent,
+                    step=step,
+                    detail=detail,
+                    status=step_status,
+                    lease_minutes=lease_minutes,
+                )
+                if not out.get("ok"):
+                    self._send_json({"ok": False, "error": out.get("error")}, status=HTTPStatus.CONFLICT)
+                    return
+                updated = store.get_task(task_id)
+                project = updated.project if updated is not None else task.project
+                broker.publish(
+                    project,
+                    "progress",
+                    {
+                        "task_id": task_id,
+                        "run_id": out["run_id"],
+                        "step_id": out["step_id"],
+                        "agent": agent,
+                        "step": step,
+                        "status": step_status,
+                        "detail": detail,
+                    },
+                )
+                self._send_json(
+                    {
+                        "ok": True,
+                        "task_id": task_id,
+                        "run_id": out["run_id"],
+                        "step_id": out["step_id"],
+                        "heartbeat_ok": out["heartbeat_ok"],
+                    }
+                )
+                return
+
             if path.startswith("/api/task/") and path.endswith("/run"):
                 parts = path.strip("/").split("/")
                 if len(parts) != 4:
@@ -845,6 +1115,18 @@ def _build_handler(
                         "task": _task_to_dict(run.task) if run.task is not None else None,
                     }
                 )
+                if run.task is not None:
+                    broker.publish(
+                        run.task.project,
+                        "task_update",
+                        {
+                            "task_id": run.task.id,
+                            "status": run.task.status,
+                            "adapter": adapter,
+                            "agent": agent,
+                            "message": run.message,
+                        },
+                    )
                 return
 
             if path.startswith("/api/task/") and path.endswith("/move"):
@@ -902,6 +1184,17 @@ def _build_handler(
                         "stage": _flow_stage_for_status(to_status),
                     }
                 )
+                if task is not None:
+                    broker.publish(
+                        task.project,
+                        "task_update",
+                        {
+                            "task_id": task.id,
+                            "status": task.status,
+                            "to_status": to_status,
+                            "source": "manual_move",
+                        },
+                    )
                 return
 
             if path in {"/webhook/github", "/webhook/github/comment", "/webhook/github/issues"}:
@@ -931,11 +1224,24 @@ def _build_handler(
                     else:
                         issues = []
                     result = discovery.ingest_issues(project, issues)
+                    broker.publish(project, "ingest", {"created": result.created, "skipped": result.skipped, "source": "issues_webhook"})
                     self._send_json({"ok": True, "created": result.created, "skipped": result.skipped})
                     return
 
                 if path == "/webhook/github/comment":
                     result = webhook.handle_pr_comment(project=project, payload=payload, adapter=adapter, agent_name=agent)
+                    broker.publish(
+                        project,
+                        "webhook_run",
+                        {
+                            "accepted": result.accepted,
+                            "duplicate": result.duplicate,
+                            "run_success": result.run_success,
+                            "message": result.message,
+                            "adapter": adapter,
+                            "agent": agent,
+                        },
+                    )
                     self._send_json(
                         {
                             "ok": True,
@@ -950,6 +1256,19 @@ def _build_handler(
                 event = self.headers.get("X-GitHub-Event", "")
                 if event in {"issue_comment", "pull_request_review_comment"}:
                     result = webhook.handle_pr_comment(project=project, payload=payload, adapter=adapter, agent_name=agent)
+                    broker.publish(
+                        project,
+                        "webhook_run",
+                        {
+                            "accepted": result.accepted,
+                            "duplicate": result.duplicate,
+                            "run_success": result.run_success,
+                            "message": result.message,
+                            "adapter": adapter,
+                            "agent": agent,
+                            "event": event,
+                        },
+                    )
                     self._send_json(
                         {
                             "ok": True,
@@ -967,6 +1286,11 @@ def _build_handler(
                     issue = payload.get("issue")
                     if action in {"opened", "reopened"} and isinstance(issue, dict):
                         result = discovery.ingest_issues(project, [issue])
+                        broker.publish(
+                            project,
+                            "ingest",
+                            {"created": result.created, "skipped": result.skipped, "source": "github_issues_event"},
+                        )
                         self._send_json({"ok": True, "event": event, "created": result.created, "skipped": result.skipped})
                         return
                     self._send_json({"ok": True, "event": event, "message": "ignored issues action"})

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from agentflow.adapters.base import AdapterContext
 from agentflow.adapters.registry import AdapterRegistry
 from agentflow.services.gates import GateEvaluator
 from agentflow.store import Store, Task
@@ -54,11 +55,18 @@ class Runner:
         )
         self.store.append_run_step(run_id, "claim", "passed", f"claimed by {agent_name}")
 
+        gate_profile = self.store.get_gate_profile(project)
+        context = AdapterContext(
+            task=task,
+            project=project,
+            repo_full_name=self.store.get_project_repo(project),
+            previous_runs=[dict(r) for r in self.store.list_runs(task.id) if int(r["id"]) != run_id][:5],
+            gate_profile=gate_profile,
+        )
         adapter = self.registry.get(adapter_name)
-        result = adapter.execute(task, agent_name)
+        result = adapter.execute(context, agent_name)
         self.store.append_run_step(run_id, "edit", "passed" if result.success else "failed", result.note)
 
-        gate_profile = self.store.get_gate_profile(project)
         gate_passed = True
         gate_summary = "gate skipped"
         if gate_profile is not None:

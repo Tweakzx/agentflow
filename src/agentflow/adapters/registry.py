@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from agentflow.adapters.base import AgentAdapter
 from agentflow.adapters.mock import MockAdapter
+from agentflow.adapters.openclaw import OpenClawAdapter
 
 
 class AdapterRegistry:
     def __init__(self) -> None:
         self._adapters: dict[str, AgentAdapter] = {}
         self.register(MockAdapter())
+        self.register(OpenClawAdapter())
 
     def register(self, adapter: AgentAdapter) -> None:
         self._adapters[adapter.name] = adapter

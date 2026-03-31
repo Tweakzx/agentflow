@@ -13,8 +13,17 @@ class AdapterResult:
     to_status: str = "pr_ready"
 
 
+@dataclass
+class AdapterContext:
+    task: Task
+    project: str
+    repo_full_name: str | None
+    previous_runs: list[dict[str, object]]
+    gate_profile: dict[str, object] | None
+
+
 class AgentAdapter(Protocol):
     name: str
 
-    def execute(self, task: Task, agent_name: str) -> AdapterResult:
+    def execute(self, context: AdapterContext, agent_name: str) -> AdapterResult:
         """Run one task and return normalized lifecycle result."""

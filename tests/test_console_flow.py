@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
-from agentflow.console import _flow_stage_for_status, _validate_manual_transition
+from agentflow.console import (
+    EventStreamBroker,
+    _flow_stage_for_status,
+    _latest_running_run_id,
+    _record_task_progress,
+    _validate_manual_transition,
+)
+from agentflow.store import Store
 
 
 class ConsoleFlowTests(unittest.TestCase):
@@ -23,6 +32,85 @@ class ConsoleFlowTests(unittest.TestCase):
         self.assertIsNone(_validate_manual_transition('pr_open', 'merged'))
         self.assertIsNotNone(_validate_manual_transition('pending', 'merged'))
         self.assertIsNotNone(_validate_manual_transition('merged', 'approved'))
+
+    def test_latest_running_run_id_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "test.db"
+            store = Store(str(db))
+            store.create_project("demo", "example/demo")
+            task_id = store.add_task(
+                project="demo",
+                title="progress task",
+                description=None,
+                priority=4,
+                impact=4,
+                effort=2,
+                source="github",
+                external_id="88",
+            )
+            self.assertIsNone(_latest_running_run_id(store, task_id))
+            run_id = store.create_run(
+                task_id=task_id,
+                project="demo",
+                trigger_type="manual",
+                trigger_ref="runner:mock",
+                adapter="mock",
+                agent_name="worker-a",
+                idempotency_key="k-1",
+            )
+            self.assertEqual(run_id, _latest_running_run_id(store, task_id))
+            store.finalize_run(run_id, "passed", gate_passed=True, result_summary="ok")
+            self.assertIsNone(_latest_running_run_id(store, task_id))
+
+    def test_record_task_progress_appends_step_and_heartbeat(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "test.db"
+            store = Store(str(db))
+            store.create_project("demo", "example/demo")
+            task_id = store.add_task(
+                project="demo",
+                title="progress task",
+                description=None,
+                priority=4,
+                impact=4,
+                effort=2,
+                source="github",
+                external_id="88",
+            )
+            claimed = store.claim_task(task_id, "demo", "worker-a", lease_minutes=15)
+            self.assertIsNotNone(claimed)
+            run_id = store.create_run(
+                task_id=task_id,
+                project="demo",
+                trigger_type="manual",
+                trigger_ref="runner:mock",
+                adapter="mock",
+                agent_name="worker-a",
+                idempotency_key="k-2",
+            )
+            out = _record_task_progress(
+                store,
+                task_id=task_id,
+                agent="worker-a",
+                step="running-tests",
+                detail="15/20 passed",
+                status="in_progress",
+                lease_minutes=20,
+            )
+            self.assertEqual(run_id, out["run_id"])
+            self.assertTrue(out["heartbeat_ok"])
+            steps = store.list_run_steps(run_id)
+            self.assertEqual("running-tests", steps[-1]["step_name"])
+            self.assertIn("15/20", steps[-1]["log_excerpt"])
+
+    def test_event_stream_broker_backlog(self) -> None:
+        broker = EventStreamBroker()
+        first = broker.publish("demo", "task_update", {"task_id": 1})
+        second = broker.publish("demo", "progress", {"task_id": 1})
+        self.assertLess(first, second)
+        events = broker.since("demo", first)
+        self.assertEqual(1, len(events))
+        self.assertEqual("progress", events[0]["event"])
 
 
 if __name__ == '__main__':
