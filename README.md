@@ -1,6 +1,44 @@
 # AgentFlow
 
-A DB-first task and issue management system designed for multiple coding agents.
+A lightweight, stage-first control plugin for coding agents to discover, manage, execute, and maintain tasks across one or multiple repositories.
+
+## Positioning
+
+AgentFlow is not another full agent platform.  
+It is a lightweight "control plugin" that enhances existing coding agents with project-level task governance:
+
+- issue/task discovery
+- stage-based flow management
+- execution and gate checks
+- PR/Issue link tracking
+- audit-friendly status maintenance
+
+## Why AgentFlow (Advantages)
+
+- Lightweight by default: SQLite-first, local-first, minimal infra.
+- Plugin-first integration: OpenClaw native plugin and bundle templates for other agent ecosystems.
+- Stage-first readability: users manage high-level stages, while internal statuses keep precision.
+- Strong process safeguards: transition validation + gate-aware promotion to review/done.
+- End-to-end traceability: runs, run steps, triggers, and status-history audit.
+- Event + manual hybrid: webhook-driven automation with manual override (force + note) when needed.
+- Multi-repo ready: one control plane can manage multiple projects/repos consistently.
+
+## Required Changes Toward "Universal Lightweight Plugin"
+
+The current version is functional, but to fully match the target ("install and use across many agents/repositories"), the next upgrades should focus on:
+
+1. Universal plugin API surface:
+   - unify around stable cross-agent actions (`pm.capabilities`, `pm.discover`, `pm.run`, `pm.move`, `pm.sync`)
+   - keep adapter layers thin per agent
+2. Multi-repo onboarding simplification:
+   - add one-step repo binding/bootstrap command for batch initialization
+3. Provider abstraction hardening:
+   - formalize GitHub provider contract (discover/create/update/close/sync)
+   - keep core decoupled from provider specifics
+4. Packaging and distribution:
+   - publish OpenClaw plugin package and provide versioned compatibility matrix for other agent bundles
+5. Policy presets:
+   - ship default stage transition profiles and gate presets for common team modes (solo, strict, fast-iterate)
 
 ## Why
 
@@ -211,8 +249,13 @@ Then configure under `plugins.entries.agentflow.config`, for example:
 Exposed by the native plugin:
 
 - Command: `agentflow.run`
+- Command: `agentflow.help`
 - Tool: `agentflow_status`
+- Tool: `agentflow_capabilities`
+- HTTP route: `GET /agentflow/capabilities`
 - HTTP route: `POST /agentflow/webhook/comment`
+- HTTP route: `POST /agentflow/webhook/issues`
+- HTTP route: `POST /agentflow/webhook/github`
 
 ### Publish to OpenClaw ecosystem
 
