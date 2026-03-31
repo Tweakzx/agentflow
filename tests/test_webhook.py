@@ -61,6 +61,17 @@ class WebhookTests(unittest.TestCase):
         runs = self.store.list_runs(1)
         self.assertEqual(1, len(runs))
 
+    def test_comment_payload_validation(self) -> None:
+        bad_payload = {"comment": "oops", "issue": {"number": 7}}
+        out = self.webhook.handle_pr_comment(
+            project="demo",
+            payload=bad_payload,
+            adapter="mock",
+            agent_name="codex-a",
+        )
+        self.assertFalse(out.accepted)
+        self.assertIn("malformed payload", out.message)
+
 
 if __name__ == "__main__":
     unittest.main()

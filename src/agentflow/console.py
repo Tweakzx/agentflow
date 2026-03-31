@@ -728,16 +728,15 @@ def _build_task_links(task: dict[str, Any], repo_full_name: str | None, runs: li
 
 
 class EventStreamBroker:
-    def __init__(self, *, max_events: int = 400) -> None:
+    def __init__(self, store: Store, *, max_events: int = 400) -> None:
+        self._store = store
         self._max_events = max(50, max_events)
         self._cond = threading.Condition()
         self._events: list[dict[str, Any]] = []
-        self._next_id = 1
 
     def publish(self, project: str, event: str, payload: dict[str, Any]) -> int:
+        event_id = self._store.append_event(project, event, payload)
         with self._cond:
-            event_id = self._next_id
-            self._next_id += 1
             self._events.append(
                 {
                     "id": event_id,
@@ -753,6 +752,22 @@ class EventStreamBroker:
             return event_id
 
     def since(self, project: str, last_event_id: int) -> list[dict[str, Any]]:
+        rows = self._store.list_events_since(project, last_event_id, limit=self._max_events)
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row["payload"]
+            parsed = json.loads(payload) if isinstance(payload, str) else {}
+            out.append(
+                {
+                    "id": int(row["id"]),
+                    "project": str(row["project"]),
+                    "event": str(row["event"]),
+                    "payload": parsed if isinstance(parsed, dict) else {"raw": parsed},
+                    "ts": int(time.time()),
+                }
+            )
+        if out:
+            return out
         with self._cond:
             return [e for e in self._events if e["project"] == project and int(e["id"]) > last_event_id]
 
@@ -850,7 +865,18 @@ def _build_handler(
     webhook: GithubCommentWebhookService,
     github_webhook_secret: str | None,
 ):
-    broker = EventStreamBroker()
+    broker = EventStreamBroker(store)
+
+    def _on_async_run_finished(project: str, task_id: int, run: Any) -> None:
+        payload = {
+            "task_id": task_id,
+            "success": bool(getattr(run, "success", False)),
+            "message": str(getattr(run, "message", "")),
+        }
+        task = getattr(run, "task", None)
+        if task is not None:
+            payload["status"] = getattr(task, "status", None)
+        broker.publish(project, "task_update", payload)
 
     class ConsoleHandler(BaseHTTPRequestHandler):
         server_version = "AgentFlowConsole/0.2"
@@ -1260,7 +1286,7 @@ def _build_handler(
                     self._send_json({"ok": False, "error": "project query parameter is required"}, status=HTTPStatus.BAD_REQUEST)
                     return
 
-                adapter = query.get("adapter", ["mock"])[0]
+                adapter = query.get("adapter", ["openclaw"])[0]
                 agent = query.get("agent", ["webhook-agent"])[0]
 
                 if path == "/webhook/github/issues":
@@ -1277,7 +1303,14 @@ def _build_handler(
                     return
 
                 if path == "/webhook/github/comment":
-                    result = webhook.handle_pr_comment(project=project, payload=payload, adapter=adapter, agent_name=agent)
+                    result = webhook.handle_pr_comment(
+                        project=project,
+                        payload=payload,
+                        adapter=adapter,
+                        agent_name=agent,
+                        async_run=True,
+                        on_run_finished=_on_async_run_finished,
+                    )
                     broker.publish(
                         project,
                         "webhook_run",
@@ -1303,7 +1336,14 @@ def _build_handler(
 
                 event = self.headers.get("X-GitHub-Event", "")
                 if event in {"issue_comment", "pull_request_review_comment"}:
-                    result = webhook.handle_pr_comment(project=project, payload=payload, adapter=adapter, agent_name=agent)
+                    result = webhook.handle_pr_comment(
+                        project=project,
+                        payload=payload,
+                        adapter=adapter,
+                        agent_name=agent,
+                        async_run=True,
+                        on_run_finished=_on_async_run_finished,
+                    )
                     broker.publish(
                         project,
                         "webhook_run",
@@ -1376,6 +1416,8 @@ def serve_console(
     print(f"AgentFlow console running on http://{host}:{port}")
     print(f"Using db: {db_path}")
     print(f"GitHub webhook secret: {'enabled' if github_webhook_secret else 'disabled'}")
+    if host not in {"127.0.0.1", "localhost"}:
+        print("WARNING: non-localhost bind detected; gate commands are project-controlled shell commands.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

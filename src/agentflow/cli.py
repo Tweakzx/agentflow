@@ -40,6 +40,7 @@ def _parser() -> argparse.ArgumentParser:
 
     p_board = sub.add_parser("board", help="Show tasks")
     p_board.add_argument("--project")
+    p_board.add_argument("--json", action="store_true")
 
     p_next = sub.add_parser("next", help="Recommend next tasks")
     p_next.add_argument("--project", required=True)
@@ -85,20 +86,25 @@ def _parser() -> argparse.ArgumentParser:
 
     p_runs = sub.add_parser("runs", help="List runs for a task")
     p_runs.add_argument("--task-id", required=True, type=int)
+    p_runs.add_argument("--json", action="store_true")
 
     p_detail = sub.add_parser("task-detail", help="Show one task with runs and status history (JSON)")
     p_detail.add_argument("--task-id", required=True, type=int)
+    p_detail.add_argument("--json", action="store_true")
 
     p_recent_runs = sub.add_parser("recent-runs", help="List recent runs for a project")
     p_recent_runs.add_argument("--project", required=True)
     p_recent_runs.add_argument("--limit", type=int, default=20)
+    p_recent_runs.add_argument("--json", action="store_true")
 
     p_audit = sub.add_parser("audit", help="List recent status transition events for a project")
     p_audit.add_argument("--project", required=True)
     p_audit.add_argument("--limit", type=int, default=50)
+    p_audit.add_argument("--json", action="store_true")
 
     p_run_steps = sub.add_parser("run-steps", help="List run steps")
     p_run_steps.add_argument("run_id", type=int)
+    p_run_steps.add_argument("--json", action="store_true")
 
     p_triggers = sub.add_parser("triggers", help="List trigger records")
     p_triggers.add_argument("--project")
@@ -201,6 +207,9 @@ def main() -> None:
 
     if args.command == "board":
         tasks = store.list_tasks(args.project)
+        if getattr(args, "json", False):
+            print(json.dumps([_task_to_dict(t) for t in tasks], ensure_ascii=False, indent=2))
+            return
         _print_tasks(tasks)
         return
 
@@ -265,6 +274,9 @@ def main() -> None:
 
     if args.command == "runs":
         rows = store.list_runs(args.task_id)
+        if getattr(args, "json", False):
+            print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))
+            return
         if not rows:
             print("(no runs)")
             return
@@ -285,11 +297,17 @@ def main() -> None:
         for run in runs:
             run["steps"] = [dict(s) for s in store.list_run_steps(int(run["id"]))]
         payload = {"task": _task_to_dict(task), "runs": runs, "history": history}
+        if getattr(args, "json", False):
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
     if args.command == "recent-runs":
         rows = store.list_recent_runs(args.project, limit=max(1, min(200, int(args.limit))))
+        if getattr(args, "json", False):
+            print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))
+            return
         if not rows:
             print("(no runs)")
             return
@@ -302,6 +320,9 @@ def main() -> None:
 
     if args.command == "audit":
         rows = store.list_recent_status_history(args.project, limit=max(1, min(200, int(args.limit))))
+        if getattr(args, "json", False):
+            print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))
+            return
         if not rows:
             print("(no events)")
             return
@@ -314,6 +335,9 @@ def main() -> None:
 
     if args.command == "run-steps":
         rows = store.list_run_steps(args.run_id)
+        if getattr(args, "json", False):
+            print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))
+            return
         if not rows:
             print("(no run steps)")
             return

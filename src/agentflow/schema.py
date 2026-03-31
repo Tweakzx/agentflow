@@ -106,6 +106,15 @@ CREATE TABLE IF NOT EXISTS gate_profiles (
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    event TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_priority ON tasks(project_id, priority DESC, impact DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_lease ON tasks(lease_until, assigned_agent);
@@ -113,6 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_project_id ON runs(project_id);
 CREATE INDEX IF NOT EXISTS idx_run_steps_run_id ON run_steps(run_id);
 CREATE INDEX IF NOT EXISTS idx_triggers_project_id ON triggers(project_id);
+CREATE INDEX IF NOT EXISTS idx_events_project_id ON events(project_id, id);
 """
 
 

@@ -34,6 +34,8 @@ Stage Board + Task Detail demo (illustrative, single image):
 - Trigger idempotency and event ingestion (`discover-issues`, `handle-comment`)
 - Periodic GitHub pull ingestion (`sync-issues`)
 - Gate enforcement with command checks and blocked-on-fail behavior
+  - Optional safety controls: `AGENTFLOW_GATE_ALLOWED_PREFIXES`
+  - Optional workspace root: `AGENTFLOW_WORKSPACE_ROOT` (for gate `cwd` resolution)
 
 ### Web Console
 
@@ -57,6 +59,7 @@ Stage Board + Task Detail demo (illustrative, single image):
 - `POST /webhook/github/issues?project=<project>`
 - `POST /webhook/github?project=<project>&adapter=openclaw&agent=bot`
 - Optional signature verification: `X-Hub-Signature-256`
+- Comment webhooks are queued asynchronously (fast ACK + background run)
 
 ### OpenClaw Native Plugin
 

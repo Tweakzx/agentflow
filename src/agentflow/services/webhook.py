@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
+from typing import Callable
 
 from agentflow.services.runner import Runner
 from agentflow.services.triggers import TriggerService
@@ -28,18 +30,24 @@ class GithubCommentWebhookService:
         payload: dict[str, object],
         adapter: str,
         agent_name: str,
+        async_run: bool = False,
+        on_run_finished: Callable[[str, int, object], None] | None = None,
     ) -> WebhookResult:
-        comment = payload.get("comment", {})
-        body = str(getattr(comment, "get", lambda _k, _d=None: "")("body", "") if isinstance(comment, dict) else "")
+        comment = payload.get("comment")
+        if not isinstance(comment, dict):
+            return WebhookResult(accepted=False, duplicate=False, message="ignored: malformed payload: comment is not a dict")
+        body = str(comment.get("body", ""))
         if "/agentflow run" not in body:
             return WebhookResult(accepted=False, duplicate=False, message="ignored: no command")
 
-        issue = payload.get("issue", {})
-        issue_number = str(getattr(issue, "get", lambda _k, _d=None: "")("number", "") if isinstance(issue, dict) else "")
+        issue = payload.get("issue")
+        if not isinstance(issue, dict):
+            return WebhookResult(accepted=False, duplicate=False, message="ignored: malformed payload: issue is not a dict")
+        issue_number = str(issue.get("number", ""))
         if not issue_number:
             return WebhookResult(accepted=False, duplicate=False, message="ignored: missing issue number")
 
-        comment_id = str(getattr(comment, "get", lambda _k, _d=None: "")("id", "") if isinstance(comment, dict) else "")
+        comment_id = str(comment.get("id", ""))
         idem = f"gh:comment:{comment_id}" if comment_id else f"gh:issue:{issue_number}:run"
         trig = self.trigger_service.register_trigger(
             project=project,
@@ -53,7 +61,7 @@ class GithubCommentWebhookService:
 
         task = self.store.get_task_by_external(project, "github", issue_number)
         if task is None:
-            title = str(getattr(issue, "get", lambda _k, _d=None: "")("title", "")) or f"issue-{issue_number}"
+            title = str(issue.get("title", "")) or f"issue-{issue_number}"
             task_id = self.store.add_task(
                 project=project,
                 title=title,
@@ -67,7 +75,28 @@ class GithubCommentWebhookService:
         else:
             task_id = task.id
 
+        if async_run:
+            thread = threading.Thread(
+                target=self._run_in_background,
+                args=(project, task_id, adapter, agent_name, on_run_finished),
+                daemon=True,
+            )
+            thread.start()
+            return WebhookResult(accepted=True, duplicate=False, message="run queued", run_success=None)
+
         run = self.runner.run_task(project, task_id, adapter, agent_name)
         if run.task is None:
             return WebhookResult(accepted=True, duplicate=False, message=run.message, run_success=False)
         return WebhookResult(accepted=True, duplicate=False, message=run.message, run_success=run.success)
+
+    def _run_in_background(
+        self,
+        project: str,
+        task_id: int,
+        adapter: str,
+        agent_name: str,
+        on_run_finished: Callable[[str, int, object], None] | None,
+    ) -> None:
+        run = self.runner.run_task(project, task_id, adapter, agent_name)
+        if on_run_finished is not None:
+            on_run_finished(project, task_id, run)

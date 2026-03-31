@@ -96,7 +96,7 @@ class ConsoleApiTests(unittest.TestCase):
 
         self.assertEqual(status1, 200)
         self.assertTrue(out1["accepted"])
-        self.assertIsNotNone(out1["run_success"])
+        self.assertIn("run_success", out1)
         self.assertEqual(status2, 200)
         self.assertTrue(out2["duplicate"])
 

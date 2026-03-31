@@ -34,6 +34,8 @@ Stage Board + 任务详情（同图示意）：
 - 触发幂等与事件接入：`discover-issues`、`handle-comment`
 - 周期拉取 GitHub issue：`sync-issues`
 - 门禁执行：命令检查 + fail 时阻塞
+  - 可选安全控制：`AGENTFLOW_GATE_ALLOWED_PREFIXES`
+  - 可选工作目录根：`AGENTFLOW_WORKSPACE_ROOT`（用于 gate `cwd`）
 
 ### Web 控制台
 
@@ -57,6 +59,7 @@ Stage Board + 任务详情（同图示意）：
 - `POST /webhook/github/issues?project=<project>`
 - `POST /webhook/github?project=<project>&adapter=openclaw&agent=bot`
 - 可选签名校验：`X-Hub-Signature-256`
+- comment webhook 默认异步排队执行（快速响应，后台运行）
 
 ### OpenClaw 原生插件
 

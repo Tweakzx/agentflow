@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 
@@ -73,7 +74,11 @@ class Runner:
             commands = gate_profile.get("commands", [])
             timeout_sec = int(gate_profile.get("timeout_sec", 1800))
             if isinstance(commands, list) and commands:
-                evaluator = GateEvaluator(timeout_sec=timeout_sec)
+                evaluator = GateEvaluator(
+                    timeout_sec=timeout_sec,
+                    cwd=self._resolve_workspace(context.repo_full_name),
+                    allowed_prefixes=self._allowed_gate_prefixes(),
+                )
                 gate_result = evaluator.evaluate([str(c) for c in commands])
                 gate_passed = gate_result.passed
                 gate_summary = "; ".join(
@@ -90,16 +95,19 @@ class Runner:
             self.store.move_task(task.id, result.to_status, result.note)
             self.store.finalize_run(run_id, "passed", gate_passed=True, result_summary=result.note)
         else:
-            message = result.note if not gate_passed else result.note
             if not gate_passed:
                 message = f"gate failed: {gate_summary}"
+                error_code = "gate_failed"
+            else:
+                message = result.note
+                error_code = "execution_failed"
             self.store.move_task(task.id, "blocked", message)
             self.store.finalize_run(
                 run_id,
                 "failed",
                 gate_passed=False,
                 result_summary=message,
-                error_code="gate_failed" if not gate_passed else "execution_failed",
+                error_code=error_code,
             )
 
         latest = [t for t in self.store.list_tasks(project) if t.id == task.id][0]
@@ -120,3 +128,17 @@ class Runner:
             agent_name = f"{agent_prefix}-{i + 1}"
             out.append(self.run_once(project, adapter_name, agent_name, lease_minutes=lease_minutes))
         return out
+
+    def _resolve_workspace(self, repo_full_name: str | None) -> str | None:
+        if not repo_full_name:
+            return None
+        root = os.environ.get("AGENTFLOW_WORKSPACE_ROOT", os.path.expanduser("~/github"))
+        workspace = os.path.join(root, repo_full_name)
+        return workspace if os.path.isdir(workspace) else None
+
+    def _allowed_gate_prefixes(self) -> list[str] | None:
+        raw = os.environ.get("AGENTFLOW_GATE_ALLOWED_PREFIXES", "").strip()
+        if not raw:
+            return None
+        vals = [x.strip() for x in raw.split(",") if x.strip()]
+        return vals or None

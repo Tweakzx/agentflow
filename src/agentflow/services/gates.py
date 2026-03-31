@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
+from typing import Sequence
 
 
 @dataclass
@@ -19,14 +20,33 @@ class GateResult:
 
 
 class GateEvaluator:
-    def __init__(self, timeout_sec: int = 1800) -> None:
+    def __init__(
+        self,
+        timeout_sec: int = 1800,
+        *,
+        cwd: str | None = None,
+        allowed_prefixes: Sequence[str] | None = None,
+    ) -> None:
         self.timeout_sec = timeout_sec
+        self.cwd = cwd
+        self.allowed_prefixes = [p.strip() for p in (allowed_prefixes or []) if str(p).strip()]
 
     def evaluate(self, commands: list[str]) -> GateResult:
         checks: list[GateCheckResult] = []
         overall = True
 
         for command in commands:
+            if self.allowed_prefixes and not self._is_allowed(command):
+                overall = False
+                checks.append(
+                    GateCheckResult(
+                        command=command,
+                        passed=False,
+                        exit_code=126,
+                        output=f"blocked by gate allowlist: {command}",
+                    )
+                )
+                break
             try:
                 proc = subprocess.run(  # noqa: S602 - command source is project-controlled gate profile
                     command,
@@ -34,6 +54,7 @@ class GateEvaluator:
                     capture_output=True,
                     text=True,
                     timeout=self.timeout_sec,
+                    cwd=self.cwd,
                 )
                 passed = proc.returncode == 0
                 if not passed:
@@ -62,3 +83,7 @@ class GateEvaluator:
                 break
 
         return GateResult(passed=overall, checks=checks)
+
+    def _is_allowed(self, command: str) -> bool:
+        stripped = command.strip()
+        return any(stripped == p or stripped.startswith(f"{p} ") for p in self.allowed_prefixes)

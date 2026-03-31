@@ -184,6 +184,15 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(task_id, int(events[0]["task_id"]))
         self.assertEqual("status-history-test", events[0]["task_title"])
 
+    def test_event_persistence(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        first_id = self.store.append_event("demo", "task_update", {"task_id": 1, "status": "pending"})
+        second_id = self.store.append_event("demo", "progress", {"task_id": 1, "step": "run"})
+        self.assertLess(first_id, second_id)
+        rows = self.store.list_events_since("demo", first_id, limit=10)
+        self.assertEqual(1, len(rows))
+        self.assertEqual("progress", rows[0]["event"])
+
 
 if __name__ == "__main__":
     unittest.main()

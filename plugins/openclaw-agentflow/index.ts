@@ -38,6 +38,16 @@ async function runAgentflow(args: string[]): Promise<{ stdout: string; stderr: s
   return { stdout: String(stdout ?? ""), stderr: String(stderr ?? "") };
 }
 
+function parseStructuredOutput(stdout: string): unknown | null {
+  const text = String(stdout || "").trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 async function runWithTempJson(
   prefix: string,
   payload: unknown,
@@ -293,8 +303,16 @@ export default definePluginEntry({
         if (!Number.isFinite(Number(input?.task_id))) {
           return { ok: false, output: "task_id is required" };
         }
-        const result = await runAgentflow(["--db", dbPath, "task-detail", "--task-id", String(Number(input.task_id))]);
-        return { ok: true, output: result.stdout || result.stderr };
+        const result = await runAgentflow([
+          "--db",
+          dbPath,
+          "task-detail",
+          "--task-id",
+          String(Number(input.task_id)),
+          "--json"
+        ]);
+        const data = parseStructuredOutput(result.stdout);
+        return data !== null ? { ok: true, output: JSON.stringify(data), data } : { ok: true, output: result.stdout || result.stderr };
       }
     });
 
@@ -311,9 +329,11 @@ export default definePluginEntry({
           "--project",
           project,
           "--limit",
-          String(Math.max(1, Math.min(200, limit)))
+          String(Math.max(1, Math.min(200, limit))),
+          "--json"
         ]);
-        return { ok: true, output: result.stdout || result.stderr };
+        const data = parseStructuredOutput(result.stdout);
+        return data !== null ? { ok: true, output: JSON.stringify(data), data } : { ok: true, output: result.stdout || result.stderr };
       }
     });
 
@@ -337,8 +357,9 @@ export default definePluginEntry({
       },
       async run(input: { project?: string }) {
         const project = input?.project || defaultProject;
-        const result = await runAgentflow(["--db", dbPath, "board", "--project", project]);
-        return { content: result.stdout || result.stderr };
+        const result = await runAgentflow(["--db", dbPath, "board", "--project", project, "--json"]);
+        const data = parseStructuredOutput(result.stdout);
+        return data !== null ? { content: JSON.stringify(data), data } : { content: result.stdout || result.stderr };
       }
     });
 
@@ -428,8 +449,9 @@ export default definePluginEntry({
         properties: { task_id: { type: "number" } }
       },
       async run(input: { task_id: number }) {
-        const result = await runAgentflow(["--db", dbPath, "task-detail", "--task-id", String(input.task_id)]);
-        return { content: result.stdout || result.stderr };
+        const result = await runAgentflow(["--db", dbPath, "task-detail", "--task-id", String(input.task_id), "--json"]);
+        const data = parseStructuredOutput(result.stdout);
+        return data !== null ? { content: JSON.stringify(data), data } : { content: result.stdout || result.stderr };
       }
     });
 
@@ -453,9 +475,11 @@ export default definePluginEntry({
           "--project",
           project,
           "--limit",
-          String(Math.max(1, Math.min(200, limit)))
+          String(Math.max(1, Math.min(200, limit))),
+          "--json"
         ]);
-        return { content: result.stdout || result.stderr };
+        const data = parseStructuredOutput(result.stdout);
+        return data !== null ? { content: JSON.stringify(data), data } : { content: result.stdout || result.stderr };
       }
     });
 
@@ -479,9 +503,11 @@ export default definePluginEntry({
           "--project",
           project,
           "--limit",
-          String(Math.max(1, Math.min(200, limit)))
+          String(Math.max(1, Math.min(200, limit))),
+          "--json"
         ]);
-        return { content: result.stdout || result.stderr };
+        const data = parseStructuredOutput(result.stdout);
+        return data !== null ? { content: JSON.stringify(data), data } : { content: result.stdout || result.stderr };
       }
     });
 

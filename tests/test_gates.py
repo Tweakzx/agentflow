@@ -43,6 +43,12 @@ class GateTests(unittest.TestCase):
         failure = evaluator.evaluate(["python3 -c \"import sys; sys.exit(2)\""])
         self.assertFalse(failure.passed)
 
+    def test_gate_allowlist_blocks_unlisted_command(self) -> None:
+        evaluator = GateEvaluator(timeout_sec=10, allowed_prefixes=["python3"])
+        out = evaluator.evaluate(["echo hi"])
+        self.assertFalse(out.passed)
+        self.assertEqual(126, out.checks[0].exit_code)
+
 
 if __name__ == "__main__":
     unittest.main()

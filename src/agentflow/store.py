@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -21,6 +22,13 @@ STATUSES = {
 
 ACTIVE_STATUSES = {"pending", "approved", "in_progress", "pr_ready", "pr_open", "blocked"}
 CLAIMABLE_STATUSES = {"pending", "approved"}
+
+
+class _ManagedConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        out = super().__exit__(exc_type, exc_val, exc_tb)
+        self.close()
+        return out
 
 
 @dataclass
@@ -49,11 +57,19 @@ class Store:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._schema_ready = False
+        self._schema_lock = threading.Lock()
 
     def connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, factory=_ManagedConnection)
         conn.row_factory = sqlite3.Row
-        ensure_schema(conn)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        if not self._schema_ready:
+            with self._schema_lock:
+                if not self._schema_ready:
+                    ensure_schema(conn)
+                    self._schema_ready = True
         return conn
 
     def create_project(self, name: str, repo_full_name: str | None) -> None:
@@ -238,6 +254,34 @@ class Store:
                 LIMIT ?
                 """,
                 (project, project_id, limit),
+            ).fetchall()
+            return list(rows)
+
+    def append_event(self, project: str, event: str, payload: dict[str, object]) -> int:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            cur = conn.execute(
+                """
+                INSERT INTO events(project_id, event, payload)
+                VALUES(?, ?, ?)
+                """,
+                (project_id, event, json.dumps(payload, ensure_ascii=False)),
+            )
+            return int(cur.lastrowid)
+
+    def list_events_since(self, project: str, last_event_id: int, limit: int = 200) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            rows = conn.execute(
+                """
+                SELECT e.id, p.name AS project, e.event, e.payload, e.created_at
+                FROM events e
+                JOIN projects p ON p.id = e.project_id
+                WHERE e.project_id = ? AND e.id > ?
+                ORDER BY e.id ASC
+                LIMIT ?
+                """,
+                (project_id, max(0, int(last_event_id)), max(1, min(1000, int(limit)))),
             ).fetchall()
             return list(rows)
 

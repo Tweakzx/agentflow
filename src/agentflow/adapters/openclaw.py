@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 
@@ -26,6 +27,8 @@ class OpenClawAdapter:
         self.runtime = runtime or os.environ.get("AGENTFLOW_OPENCLAW_RUNTIME") or "acp"
         self.timeout_sec = timeout_sec or int(os.environ.get("AGENTFLOW_OPENCLAW_TIMEOUT_SEC", "1800"))
         self.api_token = os.environ.get("AGENTFLOW_OPENCLAW_TOKEN")
+        self.max_retries = max(0, int(os.environ.get("AGENTFLOW_OPENCLAW_RETRIES", "1")))
+        self.retry_backoff_sec = max(0.0, float(os.environ.get("AGENTFLOW_OPENCLAW_BACKOFF_SEC", "1.5")))
 
     def execute(self, context: AdapterContext, agent_name: str) -> AdapterResult:
         task = context.task
@@ -58,8 +61,7 @@ class OpenClawAdapter:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
-                raw = resp.read()
+            raw = self._dispatch_with_retry(req)
         except urllib.error.URLError as exc:
             return AdapterResult(
                 success=False,
@@ -67,17 +69,18 @@ class OpenClawAdapter:
                 to_status="blocked",
             )
 
-        try:
-            result = json.loads(raw.decode("utf-8")) if raw else {}
-        except json.JSONDecodeError:
-            return AdapterResult(success=False, note="openclaw returned non-JSON response", to_status="blocked")
+        result = self._parse_response(raw)
+        if "parse_error" in result:
+            return AdapterResult(success=False, note=str(result["parse_error"]), to_status="blocked")
 
         status = str(result.get("status", "")).lower()
         summary = str(result.get("summary") or result.get("message") or "openclaw execution finished")
-        pr_url = result.get("pr_url")
+        pr_url = result.get("pr_url") or result.get("prUrl")
+        if not pr_url and isinstance(result.get("pr"), dict):
+            pr_url = result["pr"].get("url")
         pr_url_s = str(pr_url) if pr_url else None
 
-        success = status in {"completed", "success", "succeeded", "passed"}
+        success = status in {"completed", "success", "succeeded", "passed", "done", "ok"}
         if success:
             if pr_url_s:
                 return AdapterResult(success=True, note=f"{summary}; pr={pr_url_s}", to_status="pr_open")
@@ -129,3 +132,30 @@ class OpenClawAdapter:
             ]
         )
         return "\n".join(parts)
+
+    def _dispatch_with_retry(self, req: urllib.request.Request) -> bytes:
+        last: urllib.error.URLError | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
+                    return resp.read()
+            except urllib.error.URLError as exc:
+                last = exc
+                if attempt >= self.max_retries:
+                    break
+                sleep_for = self.retry_backoff_sec * (attempt + 1)
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
+        raise last if last is not None else urllib.error.URLError("unknown dispatch error")
+
+    def _parse_response(self, raw: bytes) -> dict:
+        if not raw:
+            return {}
+        try:
+            result = json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            preview = raw[:200].decode("utf-8", errors="replace")
+            return {"parse_error": f"openclaw returned non-JSON response: {exc}; preview={preview}"}
+        if not isinstance(result, dict):
+            return {"parse_error": f"openclaw response must be object, got {type(result).__name__}"}
+        return result

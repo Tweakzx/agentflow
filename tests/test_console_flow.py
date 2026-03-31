@@ -105,13 +105,17 @@ class ConsoleFlowTests(unittest.TestCase):
             self.assertIn("15/20", steps[-1]["log_excerpt"])
 
     def test_event_stream_broker_backlog(self) -> None:
-        broker = EventStreamBroker()
-        first = broker.publish("demo", "task_update", {"task_id": 1})
-        second = broker.publish("demo", "progress", {"task_id": 1})
-        self.assertLess(first, second)
-        events = broker.since("demo", first)
-        self.assertEqual(1, len(events))
-        self.assertEqual("progress", events[0]["event"])
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "test.db"
+            store = Store(str(db))
+            store.create_project("demo", "example/demo")
+            broker = EventStreamBroker(store)
+            first = broker.publish("demo", "task_update", {"task_id": 1})
+            second = broker.publish("demo", "progress", {"task_id": 1})
+            self.assertLess(first, second)
+            events = broker.since("demo", first)
+            self.assertEqual(1, len(events))
+            self.assertEqual("progress", events[0]["event"])
 
     def test_create_task_from_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

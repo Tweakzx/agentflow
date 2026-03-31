@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import tempfile
 import unittest
@@ -89,6 +90,14 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIn('"history"', detail_out)
         self.assertIn("to=pending", audit_out)
         self.assertIn("task=", recent_out)
+
+    def test_json_output_modes(self) -> None:
+        board_out = self._run_cli("board", "--project", "demo", "--json")
+        detail_out = self._run_cli("task-detail", "--task-id", str(self.task_id), "--json")
+        board_data = json.loads(board_out)
+        detail_data = json.loads(detail_out)
+        self.assertIsInstance(board_data, list)
+        self.assertIn("task", detail_data)
 
     def test_triggers_and_gate_profile_commands(self) -> None:
         trig_out = self._run_cli("triggers", "--project", "demo")

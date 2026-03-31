@@ -63,6 +63,8 @@ Optional environment variables for the adapter process:
 - `AGENTFLOW_OPENCLAW_TIMEOUT_SEC` (default: `1800`)
 - `AGENTFLOW_OPENCLAW_TOKEN` (optional bearer token)
 
+Tool outputs for detail/runs/audit/board are emitted in JSON mode and returned as structured `data` when parseable.
+
 ## Agent Discovery Pattern (OpenClaw style)
 
 When an agent is not sure how to use the plugin, it should call:
