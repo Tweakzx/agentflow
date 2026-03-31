@@ -20,9 +20,9 @@ Architecture overview:
 
 ![AgentFlow Overview](./docs/images/agentflow-overview.svg)
 
-Stage Board demo (illustrative):
+Stage Board + Task Detail demo (illustrative, single image):
 
-![AgentFlow Stage Board Demo](./docs/images/stage-board-demo.svg)
+![AgentFlow Stage Board and Task Detail Demo](./docs/images/stage-board-task-detail-demo.svg)
 
 ## What Is Implemented Today
 
