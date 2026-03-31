@@ -796,6 +796,34 @@ def _record_task_progress(
     return {"ok": True, "run_id": run_id, "step_id": step_id, "heartbeat_ok": heartbeat_ok}
 
 
+def _create_task_from_payload(store: Store, payload: dict[str, Any]) -> dict[str, Any]:
+    project = str(payload.get("project") or "").strip()
+    title = str(payload.get("title") or "").strip()
+    if not project or not title:
+        return {"ok": False, "error": "project and title are required"}
+    try:
+        priority = int(payload.get("priority", 3))
+        impact = int(payload.get("impact", 3))
+        effort = int(payload.get("effort", 3))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "priority, impact, effort must be integers"}
+    try:
+        task_id = store.add_task(
+            project=project,
+            title=title,
+            description=str(payload.get("description")) if payload.get("description") is not None else None,
+            priority=priority,
+            impact=impact,
+            effort=effort,
+            source=str(payload.get("source")) if payload.get("source") is not None else None,
+            external_id=str(payload.get("external_id")) if payload.get("external_id") is not None else None,
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    task = store.get_task(task_id)
+    return {"ok": True, "task_id": task_id, "task": _task_to_dict(task) if task is not None else None}
+
+
 def _validate_manual_transition(from_status: str, to_status: str) -> str | None:
     allowed = {
         "pending": {"approved", "blocked", "skipped"},
@@ -1022,6 +1050,26 @@ def _build_handler(
             path = parsed.path
             query = parse_qs(parsed.query)
             body = self._read_body()
+
+            if path == "/api/tasks":
+                payload = self._parse_json(body)
+                out = _create_task_from_payload(store, payload)
+                if not out.get("ok"):
+                    self._send_json({"ok": False, "error": out.get("error")}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                task = out.get("task")
+                if isinstance(task, dict):
+                    broker.publish(
+                        str(task.get("project") or payload.get("project") or ""),
+                        "task_update",
+                        {
+                            "task_id": out["task_id"],
+                            "status": str(task.get("status") or "pending"),
+                            "source": "api_create",
+                        },
+                    )
+                self._send_json({"ok": True, "task_id": out["task_id"], "task": out.get("task")})
+                return
 
             if path.startswith("/api/task/") and path.endswith("/progress"):
                 parts = path.strip("/").split("/")

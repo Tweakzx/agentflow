@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agentflow.console import (
     EventStreamBroker,
+    _create_task_from_payload,
     _flow_stage_for_status,
     _latest_running_run_id,
     _record_task_progress,
@@ -111,6 +112,30 @@ class ConsoleFlowTests(unittest.TestCase):
         events = broker.since("demo", first)
         self.assertEqual(1, len(events))
         self.assertEqual("progress", events[0]["event"])
+
+    def test_create_task_from_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "test.db"
+            store = Store(str(db))
+            store.create_project("demo", "example/demo")
+            out = _create_task_from_payload(
+                store,
+                {
+                    "project": "demo",
+                    "title": "create via api",
+                    "description": "desc",
+                    "priority": 4,
+                    "impact": 5,
+                    "effort": 2,
+                    "source": "github",
+                    "external_id": "900",
+                },
+            )
+            self.assertTrue(out["ok"])
+            task = store.get_task(int(out["task_id"]))
+            self.assertIsNotNone(task)
+            assert task is not None
+            self.assertEqual("create via api", task.title)
 
 
 if __name__ == '__main__':

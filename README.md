@@ -43,6 +43,7 @@ Stage Board + Task Detail demo (illustrative, single image):
 - Manual transition with safeguards + optional `force`
 - Recent runs + audit trail panels
 - APIs:
+  - `POST /api/tasks`
   - `GET /api/flow?project=<project>`
   - `GET /api/events?project=<project>&last_event_id=<id>` (SSE stream)
   - `GET /api/audit?project=<project>&limit=30`

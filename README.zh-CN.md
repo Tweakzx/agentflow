@@ -43,6 +43,7 @@ Stage Board + 任务详情（同图示意）：
 - 人工流转（带规则校验，支持 `force`）
 - Recent Runs + Audit Trail 面板
 - API：
+  - `POST /api/tasks`
   - `GET /api/flow?project=<project>`
   - `GET /api/events?project=<project>&last_event_id=<id>`（SSE 流式）
   - `GET /api/audit?project=<project>&limit=30`
