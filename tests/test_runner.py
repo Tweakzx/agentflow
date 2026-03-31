@@ -70,6 +70,32 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual("blocked", record.task.status)
         self.assertFalse(record.success)
 
+    def test_run_once_execution_failure_preserves_gate_passed_state(self) -> None:
+        task_id = self.store.add_task(
+            project="demo",
+            title="investigate flaky failure",
+            description=None,
+            priority=5,
+            impact=5,
+            effort=2,
+            source="github",
+            external_id="102",
+        )
+        runner = Runner(self.store, AdapterRegistry())
+        record = runner.run_once("demo", "mock", "codex-worker")
+
+        self.assertIsNotNone(record.task)
+        assert record.task is not None
+        self.assertEqual(task_id, record.task.id)
+        self.assertEqual("blocked", record.task.status)
+        self.assertFalse(record.success)
+
+        runs = self.store.list_runs(task_id)
+        self.assertEqual(1, len(runs))
+        self.assertEqual("failed", runs[0]["status"])
+        self.assertEqual(1, runs[0]["gate_passed"])
+        self.assertEqual("execution_failed", runs[0]["error_code"])
+
 
 if __name__ == "__main__":
     unittest.main()
