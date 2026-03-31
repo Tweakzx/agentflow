@@ -1,0 +1,60 @@
+<svg width="1200" height="700" viewBox="0 0 1200 700" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f3f8ff"/>
+      <stop offset="100%" stop-color="#eef7f3"/>
+    </linearGradient>
+    <style>
+      .title { font: 700 34px 'Segoe UI', Arial, sans-serif; fill: #14263f; }
+      .sub { font: 500 16px 'Segoe UI', Arial, sans-serif; fill: #4b5f7a; }
+      .h { font: 700 20px 'Segoe UI', Arial, sans-serif; fill: #132238; }
+      .t { font: 500 14px 'Segoe UI', Arial, sans-serif; fill: #2c405b; }
+      .cap { font: 700 13px 'Segoe UI', Arial, sans-serif; fill: #0b4e6d; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="700" fill="url(#bg)"/>
+  <text x="56" y="66" class="title">AgentFlow Control Plugin</text>
+  <text x="56" y="94" class="sub">Stage-first governance layer for coding agents (multi-repo, auditable, lightweight)</text>
+
+  <rect x="56" y="132" rx="16" ry="16" width="310" height="220" fill="#ffffff" stroke="#cddbef"/>
+  <text x="82" y="170" class="h">Input Sources</text>
+  <text x="82" y="203" class="t">• GitHub issues / comments</text>
+  <text x="82" y="230" class="t">• Scheduled discovery payloads</text>
+  <text x="82" y="257" class="t">• Manual task creation</text>
+  <text x="82" y="284" class="t">• Existing backlog sync</text>
+
+  <rect x="446" y="132" rx="16" ry="16" width="310" height="220" fill="#ffffff" stroke="#cddbef"/>
+  <text x="472" y="170" class="h">Core Engine</text>
+  <text x="472" y="203" class="t">• Task + stage lifecycle</text>
+  <text x="472" y="230" class="t">• Run / trigger ledger</text>
+  <text x="472" y="257" class="t">• Gate checks and safeguards</text>
+  <text x="472" y="284" class="t">• Audit trail + status history</text>
+
+  <rect x="836" y="132" rx="16" ry="16" width="310" height="220" fill="#ffffff" stroke="#cddbef"/>
+  <text x="862" y="170" class="h">Agent Adapters</text>
+  <text x="862" y="203" class="t">• OpenClaw native plugin</text>
+  <text x="862" y="230" class="t">• Codex / Claude / Cursor bundles</text>
+  <text x="862" y="257" class="t">• Common actions API (planned)</text>
+  <text x="862" y="284" class="t">• Self-describing capabilities</text>
+
+  <rect x="56" y="420" rx="16" ry="16" width="1090" height="220" fill="#ffffff" stroke="#cddbef"/>
+  <text x="82" y="458" class="h">Control Plane Outcomes</text>
+  <text x="82" y="491" class="t">• Stage Board visibility (collected → triaged → executing → review → done / blocked)</text>
+  <text x="82" y="518" class="t">• One-click run + manual flow transition with force and notes</text>
+  <text x="82" y="545" class="t">• PR/Issue links + run summaries + recent activity stream</text>
+  <text x="82" y="572" class="t">• Consistent governance for one or multiple repositories</text>
+
+  <rect x="900" y="464" rx="10" ry="10" width="218" height="38" fill="#e8f0ff" stroke="#bfd4ff"/>
+  <text x="920" y="489" class="cap">Lightweight + Plugin-first</text>
+  <rect x="900" y="514" rx="10" ry="10" width="218" height="38" fill="#e7f8ea" stroke="#bdeec7"/>
+  <text x="926" y="539" class="cap">Traceable + Governable</text>
+
+  <path d="M366 242 H436" stroke="#6d87a8" stroke-width="3" marker-end="url(#arr)"/>
+  <path d="M756 242 H826" stroke="#6d87a8" stroke-width="3" marker-end="url(#arr)"/>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L10,4 L0,8 z" fill="#6d87a8"/>
+    </marker>
+  </defs>
+</svg>

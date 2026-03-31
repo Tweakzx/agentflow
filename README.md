@@ -14,6 +14,16 @@ AgentFlow is not a full agent platform. It is a control layer that sits above ex
 - gate-aware status transitions
 - audit-friendly lifecycle history
 
+## Visual Overview
+
+Architecture overview:
+
+![AgentFlow Overview](./docs/images/agentflow-overview.svg)
+
+Stage Board demo (illustrative):
+
+![AgentFlow Stage Board Demo](./docs/images/stage-board-demo.svg)
+
 ## What Is Implemented Today
 
 ### Core Engine (CLI + DB)
