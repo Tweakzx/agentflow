@@ -2,7 +2,7 @@
 
 面向多种 Coding Agent 的轻量级、阶段（Stage）优先任务控制插件。它帮助你在一个或多个仓库中完成任务发现、流转管理、执行落地、PR/Issue 关联与状态审计。
 
-语言：中文 | [English](./README.en.md)
+语言：中文 | [English](./README.md)
 
 ## 项目定位
 
