@@ -11,6 +11,7 @@ declare module "node:fs" {
 }
 
 declare module "node:path" {
+  export function basename(path: string, suffix?: string): string;
   export function dirname(path: string): string;
   export function join(...segments: string[]): string;
   export function resolve(...segments: string[]): string;
