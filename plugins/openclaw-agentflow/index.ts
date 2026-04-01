@@ -479,7 +479,7 @@ export default definePluginEntry({
 
     const cfg: PluginConfig = (api?.config ?? {}) as PluginConfig;
     const dbPath = cfg.dbPath || "./data/agentflow.db";
-    const defaultProject = cfg.defaultProject || "default";
+    const defaultProject = cfg.defaultProject || "agentflow";
     const defaultAdapter = cfg.defaultAdapter || "openclaw";
     const defaultAgentName = cfg.defaultAgentName || "openclaw-agent";
     const capabilitiesDoc = buildCapabilitiesDoc({

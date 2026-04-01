@@ -14,7 +14,8 @@
       },
       "defaultProject": {
         "type": "string",
-        "description": "Default project name when command payload omits project"
+        "description": "Default project name when command payload omits project",
+        "default": "agentflow"
       },
       "defaultAdapter": {
         "type": "string",
