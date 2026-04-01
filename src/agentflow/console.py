@@ -549,6 +549,9 @@ INDEX_HTML = """<!doctype html>
 
     async function refreshAll() {
       if (!currentProject()) {
+        await loadProjects();
+      }
+      if (!currentProject()) {
         document.getElementById('taskList').innerHTML = '<div class=\"task\"><span class=\"sub\">No projects yet. Create one via CLI first.</span></div>';
         document.getElementById('recentRuns').innerHTML = '<div class=\"item sub\">No project selected.</div>';
         document.getElementById('auditList').innerHTML = '<div class=\"item sub\">No project selected.</div>';

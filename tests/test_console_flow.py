@@ -146,6 +146,9 @@ class ConsoleFlowTests(unittest.TestCase):
         self.assertIn("Console load failed", INDEX_HTML)
         self.assertIn("window.location.reload()", INDEX_HTML)
 
+    def test_refresh_all_reloads_projects_when_none_selected(self) -> None:
+        self.assertIn("if (!currentProject()) {\n        await loadProjects();", INDEX_HTML)
+
 
 if __name__ == '__main__':
     unittest.main()
