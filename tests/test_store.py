@@ -209,6 +209,24 @@ class StoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Transition not allowed"):
             self.store.move_task(task_id, "pending", "reopen")
 
+    def test_force_move_task_allows_manual_override(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="force-transition-test",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        self.store.move_task(task_id, "blocked", "manual block")
+        self.store.move_task(task_id, "pr_open", "manual recovery", force=True)
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertEqual("pr_open", task.status)
+
 
 if __name__ == "__main__":
     unittest.main()

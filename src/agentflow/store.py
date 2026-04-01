@@ -623,7 +623,7 @@ class Store:
             )
             return True
 
-    def move_task(self, task_id: int, to_status: str, note: str | None) -> None:
+    def move_task(self, task_id: int, to_status: str, note: str | None, force: bool = False) -> None:
         if to_status not in STATUSES:
             raise ValueError(f"Invalid status: {to_status}")
         with self.connect() as conn:
@@ -631,7 +631,8 @@ class Store:
             if row is None:
                 raise ValueError(f"Task {task_id} not found")
             from_status = str(row["status"])
-            self._validate_transition(from_status, to_status)
+            if not force:
+                self._validate_transition(from_status, to_status)
             conn.execute(
                 """
                 UPDATE tasks
