@@ -99,6 +99,12 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIsInstance(board_data, list)
         self.assertIn("task", detail_data)
 
+    def test_claim_next_creates_running_run(self) -> None:
+        out = self._run_cli("claim-next", "--project", "demo", "--agent", "worker-x")
+        self.assertIn("in_progress", out)
+        runs = self.store.list_runs(self.task_id)
+        self.assertTrue(any(str(r["status"]) == "running" for r in runs))
+
     def test_triggers_and_gate_profile_commands(self) -> None:
         trig_out = self._run_cli("triggers", "--project", "demo")
         gate_out = self._run_cli("gate-profile", "--project", "demo")
