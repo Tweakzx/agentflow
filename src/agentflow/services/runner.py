@@ -78,11 +78,16 @@ class Runner:
                     timeout_sec=timeout_sec,
                     cwd=self._resolve_workspace(context.repo_full_name),
                     allowed_prefixes=self._allowed_gate_prefixes(),
+                    strict_allowlist=self._gate_strict_allowlist(),
                 )
-                gate_result = evaluator.evaluate([str(c) for c in commands])
+                gate_result = evaluator.evaluate(commands)
                 gate_passed = gate_result.passed
                 gate_summary = "; ".join(
-                    [f"{c.command} => {'ok' if c.passed else 'fail'}" for c in gate_result.checks]
+                    [
+                        f"{c.command} => {'ok' if c.passed else 'fail'}"
+                        + (f" ({c.output})" if (not c.passed and c.output) else "")
+                        for c in gate_result.checks
+                    ]
                 )
                 self.store.append_run_step(
                     run_id,
@@ -142,3 +147,9 @@ class Runner:
             return None
         vals = [x.strip() for x in raw.split(",") if x.strip()]
         return vals or None
+
+    def _gate_strict_allowlist(self) -> bool:
+        raw = os.environ.get("AGENTFLOW_GATE_STRICT_ALLOWLIST")
+        if raw is None or not raw.strip():
+            return True
+        return raw.strip().lower() not in {"0", "false", "no", "off"}
