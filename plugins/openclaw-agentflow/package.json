@@ -3,6 +3,11 @@
   "version": "0.2.0",
   "description": "OpenClaw native plugin bridge for AgentFlow control-plane workflows",
   "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
   "main": "index.ts",
   "files": [
     "index.ts",
