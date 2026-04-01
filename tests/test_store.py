@@ -196,6 +196,10 @@ class StoreTests(unittest.TestCase):
             source=None,
             external_id=None,
         )
+        self.store.move_task(task_id, "approved", "triaged")
+        self.store.move_task(task_id, "in_progress", "work started")
+        self.store.move_task(task_id, "pr_ready", "ready for review")
+        self.store.move_task(task_id, "pr_open", "review opened")
         self.store.move_task(task_id, "done", "finalized")
         task = self.store.get_task(task_id)
         assert task is not None
@@ -209,6 +213,40 @@ class StoreTests(unittest.TestCase):
         rows = self.store.list_events_since("demo", first_id, limit=10)
         self.assertEqual(1, len(rows))
         self.assertEqual("progress", rows[0]["event"])
+
+    def test_terminal_status_cannot_reopen(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="terminal-state-test",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        self.store.move_task(task_id, "skipped", "out of scope")
+        with self.assertRaisesRegex(ValueError, "Transition not allowed"):
+            self.store.move_task(task_id, "pending", "reopen")
+
+    def test_force_move_task_allows_manual_override(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="force-transition-test",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        self.store.move_task(task_id, "blocked", "manual block")
+        self.store.move_task(task_id, "pr_open", "manual recovery", force=True)
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertEqual("pr_open", task.status)
 
 
 if __name__ == "__main__":

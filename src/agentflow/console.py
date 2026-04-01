@@ -1274,7 +1274,7 @@ def _build_handler(
                 final_note = str(note) if note is not None else ""
                 final_note = f"[manual-web] {final_note}".strip()
                 try:
-                    store.move_task(task_id, to_status, final_note)
+                    store.move_task(task_id, to_status, final_note, force=force)
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                     return
