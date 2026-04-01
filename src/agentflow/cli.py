@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -229,6 +230,16 @@ def main() -> None:
         if task is None:
             print("no claimable task")
         else:
+            run_id = store.create_run(
+                task_id=task.id,
+                project=args.project,
+                trigger_type="manual",
+                trigger_ref="cli:claim-next",
+                adapter="manual",
+                agent_name=args.agent,
+                idempotency_key=f"{args.project}:{task.id}:claim-next:{args.agent}:{time.time_ns()}",
+            )
+            store.append_run_step(run_id, "claim", "passed", f"claimed by {args.agent} via cli")
             _print_tasks([task])
         return
 
