@@ -199,7 +199,7 @@ function buildCapabilitiesDoc(config: {
       {
         id: "agentflow_move",
         when: "Move one task to a target status",
-        example: "agentflow_move {\"task_id\":12,\"to_status\":\"approved\",\"note\":\"triaged\"}"
+        example: "agentflow_move {\"task_id\":12,\"to_status\":\"ready\",\"note\":\"queued for implementation\"}"
       },
       {
         id: "agentflow_detail",
@@ -254,7 +254,7 @@ function buildCapabilitiesDoc(config: {
           required: ["task_id", "to_status"],
           properties: {
             task_id: { type: "number" },
-            to_status: { type: "string", enum: [...CANONICAL_STATUSES, "pending", "approved", "pr_ready", "pr_open", "merged", "skipped", "triaged"] },
+            to_status: { type: "string", enum: [...CANONICAL_STATUSES] },
             note: { type: "string" }
           }
         }
@@ -726,7 +726,7 @@ export default definePluginEntry({
           task_id: { type: "number", description: "Task numeric id." },
           to_status: {
             type: "string",
-            enum: [...CANONICAL_STATUSES, "pending", "approved", "pr_ready", "pr_open", "merged", "skipped", "triaged"],
+            enum: [...CANONICAL_STATUSES],
             description: "Target workflow status.",
           },
           note: { type: "string", description: "Optional transition note." }

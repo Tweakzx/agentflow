@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -177,14 +178,14 @@ class StoreTests(unittest.TestCase):
             source="github",
             external_id="9011",
         )
-        self.store.move_task(task_id, "ready", "triaged")
+        self.store.move_task(task_id, "ready", "ready")
 
         events = self.store.list_recent_status_history("demo", limit=10)
         self.assertGreaterEqual(len(events), 2)
         self.assertEqual(task_id, int(events[0]["task_id"]))
         self.assertEqual("status-history-test", events[0]["task_title"])
 
-    def test_done_alias_maps_to_merged(self) -> None:
+    def test_done_status_transitions(self) -> None:
         self.store.create_project("demo", "example/demo")
         task_id = self.store.add_task(
             project="demo",
@@ -196,7 +197,7 @@ class StoreTests(unittest.TestCase):
             source=None,
             external_id=None,
         )
-        self.store.move_task(task_id, "ready", "triaged")
+        self.store.move_task(task_id, "ready", "ready")
         self.store.move_task(task_id, "in_progress", "work started")
         self.store.move_task(task_id, "review", "ready for review")
         self.store.move_task(task_id, "done", "finalized")
@@ -247,11 +248,11 @@ class StoreTests(unittest.TestCase):
         assert task is not None
         self.assertEqual("review", task.status)
 
-    def test_legacy_status_aliases_map_to_new_model(self) -> None:
+    def test_legacy_status_names_are_rejected(self) -> None:
         self.store.create_project("demo", "example/demo")
         task_id = self.store.add_task(
             project="demo",
-            title="legacy-aliases",
+            title="legacy-statuses",
             description=None,
             priority=3,
             impact=3,
@@ -259,12 +260,67 @@ class StoreTests(unittest.TestCase):
             source=None,
             external_id=None,
         )
-        self.store.move_task(task_id, "approved", "legacy-ready")
-        self.store.move_task(task_id, "pr_ready", "legacy-review")
-        self.store.move_task(task_id, "merged", "legacy-done")
-        task = self.store.get_task(task_id)
+        with self.assertRaisesRegex(ValueError, "Invalid status"):
+            self.store.move_task(task_id, "approved", "legacy-ready")
+
+    def test_add_task_sets_todo_even_if_legacy_table_default_is_pending(self) -> None:
+        db_path = str(Path(self.tempdir.name) / "legacy-default.db")
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    repo_full_name TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    priority INTEGER NOT NULL DEFAULT 3 CHECK(priority BETWEEN 1 AND 5),
+                    impact INTEGER NOT NULL DEFAULT 3 CHECK(impact BETWEEN 1 AND 5),
+                    effort INTEGER NOT NULL DEFAULT 3 CHECK(effort BETWEEN 1 AND 5),
+                    source TEXT,
+                    external_id TEXT,
+                    branch TEXT,
+                    pr_url TEXT,
+                    assigned_agent TEXT,
+                    lease_until TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE status_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    from_status TEXT,
+                    to_status TEXT NOT NULL,
+                    note TEXT,
+                    changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                """
+            )
+            conn.execute("INSERT INTO projects(name, repo_full_name) VALUES('demo', 'example/demo')")
+            conn.commit()
+
+        legacy_store = Store(db_path)
+        task_id = legacy_store.add_task(
+            project="demo",
+            title="legacy-default-pending",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        task = legacy_store.get_task(task_id)
         assert task is not None
-        self.assertEqual("done", task.status)
+        self.assertEqual("todo", task.status)
+        claimed = legacy_store.claim_next_task("demo", "worker-a")
+        self.assertIsNotNone(claimed)
 
 
 if __name__ == "__main__":

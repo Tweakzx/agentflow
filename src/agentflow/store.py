@@ -30,25 +30,6 @@ ALLOWED_TRANSITIONS = {
     "done": set(),
     "dropped": set(),
 }
-STATUS_ALIASES = {
-    # New names.
-    "todo": "todo",
-    "ready": "ready",
-    "review": "review",
-    "done": "done",
-    "dropped": "dropped",
-    # Old canonical names.
-    "pending": "todo",
-    "approved": "ready",
-    "pr_ready": "review",
-    "pr_open": "review",
-    "merged": "done",
-    "skipped": "dropped",
-    # Human-friendly aliases.
-    "triaged": "ready",
-}
-
-
 class _ManagedConnection(sqlite3.Connection):
     def __exit__(self, exc_type, exc_val, exc_tb):
         out = super().__exit__(exc_type, exc_val, exc_tb)
@@ -129,8 +110,8 @@ class Store:
             project_id = self._project_id(conn, project)
             cur = conn.execute(
                 """
-                INSERT INTO tasks(project_id, title, description, priority, impact, effort, source, external_id)
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO tasks(project_id, title, description, status, priority, impact, effort, source, external_id)
+                VALUES(?, ?, ?, 'todo', ?, ?, ?, ?, ?)
                 """,
                 (project_id, title, description, priority, impact, effort, source, external_id),
             )
@@ -679,12 +660,10 @@ class Store:
             raise ValueError(f"Transition not allowed: {from_status} -> {to_status}")
 
     def _normalize_status(self, status: str) -> str:
-        normalized = STATUS_ALIASES.get(status, status)
-        if normalized not in STATUSES:
+        if status not in STATUSES:
             valid = ", ".join(sorted(STATUSES))
-            aliases = ", ".join(f"{k}->{v}" for k, v in sorted(STATUS_ALIASES.items()))
-            raise ValueError(f"Invalid status: {status}. Valid statuses: {valid}. Aliases: {aliases}")
-        return normalized
+            raise ValueError(f"Invalid status: {status}. Valid statuses: {valid}")
+        return status
 
     def list_in_progress(self, project: str | None = None) -> list[Task]:
         with self.connect() as conn:
