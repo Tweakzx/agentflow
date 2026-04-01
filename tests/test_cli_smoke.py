@@ -10,6 +10,8 @@ from pathlib import Path
 from agentflow.cli import _parser
 from agentflow.store import Store
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 
 class CliSmokeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -71,7 +73,7 @@ class CliSmokeTests(unittest.TestCase):
             capture_output=True,
             text=True,
             env={**os.environ, "PYTHONPATH": "src"},
-            cwd="/home/shawn/github/agentflow",
+            cwd=str(PROJECT_ROOT),
             check=True,
         )
         return proc.stdout
@@ -90,7 +92,7 @@ class CliSmokeTests(unittest.TestCase):
             capture_output=True,
             text=True,
             env={**os.environ, "PYTHONPATH": "src"},
-            cwd="/home/shawn/github/agentflow",
+            cwd=str(PROJECT_ROOT),
             check=False,
         )
         return proc.returncode, proc.stdout, proc.stderr
@@ -237,7 +239,7 @@ class CliSmokeTests(unittest.TestCase):
             capture_output=True,
             text=True,
             env={**os.environ, "PYTHONPATH": "src"},
-            cwd="/home/shawn/github/agentflow",
+            cwd=str(PROJECT_ROOT),
             check=False,
         )
         self.assertNotEqual(proc.returncode, 0)

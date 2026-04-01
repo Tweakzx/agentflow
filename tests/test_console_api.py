@@ -84,6 +84,15 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(recent["runs"]), 1)
         self.assertEqual(recent["runs"][0]["task_id"], self.task_id)
 
+    def test_health_and_ready_endpoints(self) -> None:
+        self._start_server()
+        health = self._get_json("/healthz")
+        ready = self._get_json("/readyz")
+        self.assertTrue(health["ok"])
+        self.assertEqual("healthy", health["status"])
+        self.assertTrue(ready["ok"])
+        self.assertEqual("ready", ready["status"])
+
     def test_comment_webhook_endpoint_is_idempotent(self) -> None:
         self._start_server()
         payload = {

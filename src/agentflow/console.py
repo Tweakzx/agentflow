@@ -945,6 +945,22 @@ def _build_handler(
                 self._send_html(INDEX_HTML)
                 return
 
+            if path == "/healthz":
+                self._send_json({"ok": True, "status": "healthy"})
+                return
+
+            if path == "/readyz":
+                try:
+                    with store.connect() as conn:
+                        conn.execute("SELECT 1")
+                    self._send_json({"ok": True, "status": "ready"})
+                except Exception as exc:
+                    self._send_json(
+                        {"ok": False, "status": "not_ready", "error": str(exc)},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                return
+
             if path == "/api/projects":
                 self._send_json({"projects": list(store.projects())})
                 return

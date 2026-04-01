@@ -35,7 +35,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(120, profile["timeout_sec"])
 
     def test_gate_evaluator_success_and_failure(self) -> None:
-        evaluator = GateEvaluator(timeout_sec=10)
+        evaluator = GateEvaluator(timeout_sec=10, allowed_prefixes=["python3"])
 
         success = evaluator.evaluate(["python3 -c \"print('ok')\""])
         self.assertTrue(success.passed)
@@ -48,6 +48,16 @@ class GateTests(unittest.TestCase):
         out = evaluator.evaluate(["echo hi"])
         self.assertFalse(out.passed)
         self.assertEqual(126, out.checks[0].exit_code)
+
+    def test_gate_supports_structured_command(self) -> None:
+        evaluator = GateEvaluator(timeout_sec=10, allowed_prefixes=["python3"])
+        out = evaluator.evaluate([{"command": "python3", "args": ["-c", "print('ok')"]}])
+        self.assertTrue(out.passed)
+
+    def test_gate_strict_mode_can_be_disabled(self) -> None:
+        evaluator = GateEvaluator(timeout_sec=10, strict_mode=False)
+        out = evaluator.evaluate(["echo hi"])
+        self.assertTrue(out.passed)
 
 
 if __name__ == "__main__":
