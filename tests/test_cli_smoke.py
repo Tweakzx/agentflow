@@ -76,6 +76,25 @@ class CliSmokeTests(unittest.TestCase):
         )
         return proc.stdout
 
+    def _run_cli_rc(self, *args: str) -> tuple[int, str, str]:
+        cmd = [
+            "python3",
+            "-m",
+            "agentflow.cli",
+            "--db",
+            str(self.db),
+            *args,
+        ]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "src"},
+            cwd="/home/shawn/github/agentflow",
+            check=False,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
     def test_runs_and_steps_commands(self) -> None:
         runs_out = self._run_cli("runs", "--task-id", str(self.task_id))
         steps_out = self._run_cli("run-steps", str(self.run_id))
@@ -145,6 +164,12 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(args.command, "sync-issues")
         self.assertEqual(args.project, "demo")
         self.assertEqual(args.repo, "owner/repo")
+
+    def test_move_invalid_status_returns_friendly_error(self) -> None:
+        rc, _out, err = self._run_cli_rc("move", str(self.task_id), "not_a_status")
+        self.assertEqual(1, rc)
+        self.assertIn("error: Invalid status", err)
+        self.assertNotIn("Traceback", err)
 
 
 if __name__ == "__main__":
