@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/core";
 
@@ -30,12 +33,72 @@ type CapabilityDoc = {
   workflow: string[];
 };
 
+type CommandSpec = {
+  cmd: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string | undefined>;
+};
+
+const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_AGENTFLOW_ROOT = process.env.AGENTFLOW_ROOT || resolve(PLUGIN_DIR, "..", "..");
+const DEFAULT_VENV_PYTHON = resolve(DEFAULT_AGENTFLOW_ROOT, ".venv", "bin", "python3");
+
+function mergePythonPath(extraPath: string): string {
+  const current = process.env.PYTHONPATH;
+  return current ? `${extraPath}:${current}` : extraPath;
+}
+
+function isRecoverableLaunchError(err: unknown): boolean {
+  const anyErr = err as { code?: string; stderr?: string };
+  if (anyErr?.code === "ENOENT") return true;
+  const stderr = String(anyErr?.stderr ?? "");
+  return stderr.includes("No module named agentflow");
+}
+
 async function runAgentflow(args: string[]): Promise<{ stdout: string; stderr: string }> {
-  const { stdout, stderr } = await execFileAsync("python3", ["-m", "agentflow.cli", ...args], {
-    env: { ...process.env, PYTHONPATH: "src" },
-    cwd: process.cwd()
-  });
-  return { stdout: String(stdout ?? ""), stderr: String(stderr ?? "") };
+  const fallbackPyPath = resolve(DEFAULT_AGENTFLOW_ROOT, "src");
+  const specs: CommandSpec[] = [
+    {
+      cmd: "agentflow",
+      args,
+      cwd: DEFAULT_AGENTFLOW_ROOT,
+      env: { ...process.env },
+    },
+    ...(existsSync(DEFAULT_VENV_PYTHON)
+      ? [
+          {
+            cmd: DEFAULT_VENV_PYTHON,
+            args: ["-m", "agentflow.cli", ...args],
+            cwd: DEFAULT_AGENTFLOW_ROOT,
+            env: { ...process.env, PYTHONPATH: mergePythonPath(fallbackPyPath) },
+          } satisfies CommandSpec,
+        ]
+      : []),
+    {
+      cmd: "python3",
+      args: ["-m", "agentflow.cli", ...args],
+      cwd: DEFAULT_AGENTFLOW_ROOT,
+      env: { ...process.env, PYTHONPATH: mergePythonPath(fallbackPyPath) },
+    },
+  ];
+
+  let lastErr: unknown;
+  for (const spec of specs) {
+    try {
+      const { stdout, stderr } = await execFileAsync(spec.cmd, spec.args, {
+        env: spec.env,
+        cwd: spec.cwd,
+      });
+      return { stdout: String(stdout ?? ""), stderr: String(stderr ?? "") };
+    } catch (err) {
+      lastErr = err;
+      if (!isRecoverableLaunchError(err)) {
+        throw err;
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function parseStructuredOutput(stdout: string): unknown | null {
