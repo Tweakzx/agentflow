@@ -1,4 +1,4 @@
-name: PR Blocking E2E
+name: PR Full Python Tests
 
 on:
   pull_request:
@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  e2e:
-    name: cli-api-e2e
+  full-python-tests:
+    name: full-python-suite
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONHASHSEED: "0"
@@ -26,5 +26,5 @@ jobs:
       - name: Install package
         run: python -m pip install -e .
 
-      - name: Run PR-blocking E2E suite
-        run: ./scripts/run_pr_blocking_e2e.sh
+      - name: Run full Python test suite
+        run: ./scripts/run_full_python_tests.sh

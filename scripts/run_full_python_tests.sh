@@ -8,7 +8,5 @@ export PYTHONPATH=src
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONHASHSEED=0
 
-echo "[E2E] Running PR-blocking CLI/API end-to-end suite"
-python3 -m unittest -v \
-  tests.test_cli_smoke \
-  tests.test_console_api
+echo "[TEST] Running full Python test suite"
+python3 -m unittest discover -s tests -p 'test_*.py' -v
