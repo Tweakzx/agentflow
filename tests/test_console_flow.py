@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 
 from agentflow.console import (
+    CONSOLE_CSS,
+    CONSOLE_JS,
     EventStreamBroker,
     INDEX_HTML,
     _create_task_from_payload,
@@ -142,11 +144,34 @@ class ConsoleFlowTests(unittest.TestCase):
             self.assertEqual("create via api", task.title)
 
     def test_console_boot_error_ui_has_retry(self) -> None:
-        self.assertIn("Console load failed", INDEX_HTML)
-        self.assertIn("window.location.reload()", INDEX_HTML)
+        self.assertIn("Console load failed", CONSOLE_JS)
+        self.assertIn("window.location.reload()", CONSOLE_JS)
 
     def test_refresh_all_reloads_projects_when_none_selected(self) -> None:
-        self.assertIn("if (!currentProject()) {\n        await loadProjects();", INDEX_HTML)
+        self.assertIn("if (!currentProject()) {\n        await loadProjects();", CONSOLE_JS)
+
+    def test_task_list_uses_collapsible_status_groups(self) -> None:
+        self.assertIn('status-accordion', CONSOLE_JS)
+        self.assertIn('class="status-group"', CONSOLE_JS)
+
+    def test_console_does_not_include_custom_favicon(self) -> None:
+        self.assertIn('rel="icon"', INDEX_HTML)
+        self.assertIn("data:image/svg+xml", INDEX_HTML)
+        self.assertIn("%F0%9F%A6%8A", INDEX_HTML)
+
+    def test_console_does_not_render_stage_board(self) -> None:
+        self.assertNotIn("Stage Board", INDEX_HTML)
+        self.assertIn("Task List", INDEX_HTML)
+
+    def test_console_title_and_brand_include_fox(self) -> None:
+        self.assertIn("<title>AgentFlow Console</title>", INDEX_HTML)
+        self.assertIn("🦊 AgentFlow Console", INDEX_HTML)
+
+    def test_console_uses_external_template_assets(self) -> None:
+        self.assertIn('/static/console.css?v=dev', INDEX_HTML)
+        self.assertIn('/static/console.js?v=dev', INDEX_HTML)
+        self.assertTrue(CONSOLE_CSS.strip())
+        self.assertTrue(CONSOLE_JS.strip())
 
 
 if __name__ == '__main__':

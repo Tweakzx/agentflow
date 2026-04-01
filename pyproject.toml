@@ -20,3 +20,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agentflow = ["web/templates/*.html", "web/static/*.css", "web/static/*.js"]

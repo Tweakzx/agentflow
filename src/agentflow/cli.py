@@ -87,6 +87,7 @@ def _parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8787)
     p_serve.add_argument("--github-webhook-secret")
+    p_serve.add_argument("--reload", action="store_true", help="Reload console template/static assets on each request")
 
     p_runs = sub.add_parser("runs", help="List runs for a task")
     p_runs.add_argument("--task-id", required=True, type=int)
@@ -300,7 +301,13 @@ def main() -> None:
         return
 
     if args.command == "serve":
-        serve_console(args.host, args.port, args.db, github_webhook_secret=args.github_webhook_secret)
+        serve_console(
+            args.host,
+            args.port,
+            args.db,
+            github_webhook_secret=args.github_webhook_secret,
+            reload=args.reload,
+        )
         return
 
     if args.command == "runs":

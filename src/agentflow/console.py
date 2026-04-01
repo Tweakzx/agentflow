@@ -9,6 +9,7 @@ import time
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -23,7 +24,7 @@ INDEX_HTML = """<!doctype html>
 <head>
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-  <title>AgentFlow Console</title>
+  <title>🦊 AgentFlow Console</title>
   <style>
     :root {
       --bg: #f3f7fb;
@@ -85,6 +86,46 @@ INDEX_HTML = """<!doctype html>
       font-family: inherit;
     }
     .task-list { max-height: calc(100vh - 280px); overflow: auto; }
+    .status-accordion { padding: 8px 10px 12px; }
+    .status-group {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      margin-bottom: 10px;
+      background: #fbfdff;
+      overflow: hidden;
+    }
+    .status-group[open] {
+      box-shadow: 0 8px 20px rgba(17, 42, 71, 0.06);
+    }
+    .status-summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid transparent;
+      background: #f4f8ff;
+    }
+    .status-summary::-webkit-details-marker { display: none; }
+    .status-group[open] .status-summary { border-bottom-color: var(--line); }
+    .status-heading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      text-transform: capitalize;
+    }
+    .status-count {
+      font-size: 11px;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 1px 7px;
+      background: #fff;
+    }
+    .group-body { padding: 2px 0 4px; }
     .task { padding: 10px 14px; border-bottom: 1px solid #eef3f9; cursor: pointer; }
     .task:hover { background: #f7fbff; }
     .task.active { background: #e9f7f4; border-left: 4px solid var(--accent); padding-left: 10px; }
@@ -102,7 +143,7 @@ INDEX_HTML = """<!doctype html>
     }
     .stage-todo { background: #e8f0ff; color: var(--c-todo); border-color: #bfd4ff; }
     .stage-ready { background: #efe9ff; color: var(--c-ready); border-color: #d8c8ff; }
-    .stage-executing { background: #e4f7f4; color: var(--c-executing); border-color: #b5ece4; }
+    .stage-executing, .stage-in_progress { background: #e4f7f4; color: var(--c-executing); border-color: #b5ece4; }
     .stage-review { background: #fff4e6; color: var(--c-review); border-color: #ffdcb1; }
     .stage-done { background: #e7f8ea; color: var(--c-done); border-color: #bdeec7; }
     .stage-blocked { background: #ffe8e8; color: var(--c-blocked); border-color: #ffc2c2; }
@@ -140,39 +181,6 @@ INDEX_HTML = """<!doctype html>
     a:hover { text-decoration: underline; }
     .err { color: var(--warn); font-weight: 600; }
     .ok { color: var(--ok); font-weight: 600; }
-    .board-wrap {
-      display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
-      gap: 10px;
-      padding: 0 14px 14px;
-    }
-    .col {
-      background: #f9fbff;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      min-height: 120px;
-    }
-    .col h4 {
-      margin: 0;
-      padding: 10px;
-      border-bottom: 1px solid var(--line);
-      font-size: 13px;
-    }
-    .col.stage-todo h4 { background: #e8f0ff; }
-    .col.stage-ready h4 { background: #efe9ff; }
-    .col.stage-executing h4 { background: #e4f7f4; }
-    .col.stage-review h4 { background: #fff4e6; }
-    .col.stage-done h4 { background: #e7f8ea; }
-    .col.stage-blocked h4 { background: #ffe8e8; }
-    .chip {
-      margin: 8px;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fff;
-      padding: 8px;
-      font-size: 12px;
-      cursor: pointer;
-    }
     .split {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -191,12 +199,10 @@ INDEX_HTML = """<!doctype html>
     }
     @media (max-width: 1200px) {
       .layout { grid-template-columns: 1fr; }
-      .board-wrap { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .split { grid-template-columns: 1fr; }
       .detail-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
     }
     @media (max-width: 700px) {
-      .board-wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .detail-grid { grid-template-columns: 1fr; }
     }
   </style>
@@ -204,8 +210,8 @@ INDEX_HTML = """<!doctype html>
 <body>
   <div class=\"topbar\">
     <div>
-      <div class=\"brand\">AgentFlow Console</div>
-      <div class=\"sub\">Task center + visual board + recent run stream</div>
+      <div class=\"brand\">🦊 AgentFlow Console</div>
+      <div class=\"sub\">Task list + recent run stream</div>
     </div>
     <div class=\"toolbar\">
       <label class=\"sub\">Project</label>
@@ -216,19 +222,11 @@ INDEX_HTML = """<!doctype html>
     </div>
   </div>
 
-  <section class=\"panel\" style=\"margin: 14px 14px 0\">
-    <h3>Stage Board</h3>
-    <div id=\"board\" class=\"board-wrap\"></div>
-  </section>
-
   <div class=\"layout\">
     <section class=\"panel\">
       <h3>Task List</h3>
       <div class=\"filters\">
         <input id=\"q\" placeholder=\"search title...\" oninput=\"renderTaskList()\" />
-        <select id=\"stageFilter\" onchange=\"renderTaskList()\">
-          <option value=\"\">all stages</option>
-        </select>
         <select id=\"sourceFilter\" onchange=\"renderTaskList()\">
           <option value=\"\">all sources</option>
         </select>
@@ -266,6 +264,15 @@ INDEX_HTML = """<!doctype html>
       streamLastEventId: 0,
       recentRuns: [],
       audit: [],
+      stageOpen: {
+        todo: true,
+        ready: true,
+        in_progress: true,
+        review: true,
+        blocked: true,
+        done: false,
+        dropped: false,
+      },
     };
 
     async function api(url, opts) {
@@ -293,15 +300,8 @@ INDEX_HTML = """<!doctype html>
       return 'other';
     }
 
-    function targetStatusForStage(stage) {
-      if (stage === 'todo') return 'todo';
-      if (stage === 'ready') return 'ready';
-      if (stage === 'in_progress') return 'in_progress';
-      if (stage === 'review') return 'review';
-      if (stage === 'done') return 'done';
-      if (stage === 'dropped') return 'dropped';
-      if (stage === 'blocked') return 'blocked';
-      return 'todo';
+    function statusOrder() {
+      return ['todo', 'ready', 'in_progress', 'review', 'blocked', 'done', 'dropped'];
     }
 
     async function loadProjects() {
@@ -327,18 +327,12 @@ INDEX_HTML = """<!doctype html>
     async function loadTasks() {
       const data = await api(`/api/tasks?project=${encodeURIComponent(currentProject())}`);
       state.tasks = data.tasks || [];
-      const stages = [...new Set(state.tasks.map(t => stageOf(t.status)))].sort();
       const sources = [...new Set(state.tasks.map(t => t.source || 'unknown'))].sort();
-      const stageSel = document.getElementById('stageFilter');
       const sourceSel = document.getElementById('sourceFilter');
-      const oldStage = stageSel.value;
       const oldSource = sourceSel.value;
-      stageSel.innerHTML = '<option value="">all stages</option>' + stages.map(s => `<option value=\"${s}\">${s}</option>`).join('');
       sourceSel.innerHTML = '<option value="">all sources</option>' + sources.map(s => `<option value=\"${s}\">${s}</option>`).join('');
-      if (stages.includes(oldStage)) stageSel.value = oldStage;
       if (sources.includes(oldSource)) sourceSel.value = oldSource;
       renderTaskList();
-      renderBoard();
     }
 
     async function loadStatsAndRuns() {
@@ -353,10 +347,8 @@ INDEX_HTML = """<!doctype html>
 
     function renderTaskList() {
       const q = document.getElementById('q').value.trim().toLowerCase();
-      const stage = document.getElementById('stageFilter').value;
       const source = document.getElementById('sourceFilter').value;
       state.filtered = state.tasks.filter(t => {
-        if (stage && stageOf(t.status) !== stage) return false;
         if (source && (t.source || 'unknown') !== source) return false;
         if (q && !t.title.toLowerCase().includes(q)) return false;
         return true;
@@ -366,27 +358,39 @@ INDEX_HTML = """<!doctype html>
         root.innerHTML = '<div class=\"task\"><span class=\"sub\">No tasks</span></div>';
         return;
       }
-      root.innerHTML = state.filtered.map(t => `
-        <div class=\"task ${state.selectedTask && state.selectedTask.id === t.id ? 'active' : ''}\" onclick=\"openTask(${t.id})\">
-          <div class=\"task-title\">#${t.id} ${t.title}</div>
-          <div class=\"meta\">
-            <span class=\"badge-chip ${stageClass(stageOf(t.status))}\">${stageOf(t.status)}</span>
-            <span>p${t.priority}/i${t.impact}/e${t.effort}</span>
-            <span>${t.assigned_agent || '-'}</span>
-          </div>
-        </div>`).join('');
+      const grouped = {};
+      for (const st of statusOrder()) grouped[st] = [];
+      for (const t of state.filtered) {
+        const st = stageOf(t.status);
+        if (!grouped[st]) grouped[st] = [];
+        grouped[st].push(t);
+      }
+      root.innerHTML = `<div class=\"status-accordion\">${statusOrder().map(st => {
+        const tasks = grouped[st] || [];
+        const isOpen = state.stageOpen[st] !== undefined ? state.stageOpen[st] : tasks.length > 0;
+        const tasksHtml = tasks.length
+          ? tasks.map(t => `
+            <div class=\"task ${state.selectedTask && state.selectedTask.id === t.id ? 'active' : ''}\" onclick=\"openTask(${t.id})\">
+              <div class=\"task-title\">#${t.id} ${t.title}</div>
+              <div class=\"meta\">
+                <span>p${t.priority}/i${t.impact}/e${t.effort}</span>
+                <span>${t.assigned_agent || '-'}</span>
+              </div>
+            </div>`).join('')
+          : '<div class=\"task\"><span class=\"sub\">No tasks</span></div>';
+        return `
+          <details class=\"status-group\" ${isOpen ? 'open' : ''} ontoggle=\"onStageToggle('${st}', this.open)\">
+            <summary class=\"status-summary\">
+              <span class=\"status-heading\"><span class=\"badge-chip ${stageClass(st)}\">${st}</span></span>
+              <span class=\"status-count\">${tasks.length}</span>
+            </summary>
+            <div class=\"group-body\">${tasksHtml}</div>
+          </details>`;
+      }).join('')}</div>`;
     }
 
-    function renderBoard() {
-      const stages = ['todo', 'ready', 'in_progress', 'review', 'done', 'blocked', 'dropped'];
-      const root = document.getElementById('board');
-      root.innerHTML = stages.map(st => {
-        const tasks = state.tasks.filter(t => stageOf(t.status) === st).slice(0, 12);
-        const items = tasks.map(
-          t => `<div class=\"chip\" draggable=\"true\" ondragstart=\"dragTask(event, ${t.id})\" onclick=\"openTask(${t.id})\">#${t.id} ${t.title}<div class=\"sub\">${t.status}</div></div>`
-        ).join('') || '<div class=\"sub\" style=\"padding:10px\">(empty)</div>';
-        return `<section class=\"col ${stageClass(st)}\" ondragover=\"allowDrop(event)\" ondrop=\"dropToStage(event, '${st}')\"><h4>${st} (${tasks.length})</h4>${items}</section>`;
-      }).join('');
+    function onStageToggle(stage, open) {
+      state.stageOpen[stage] = Boolean(open);
     }
 
     function renderRecentRuns() {
@@ -416,23 +420,6 @@ INDEX_HTML = """<!doctype html>
           <div class=\"sub\">${e.note || '-'}</div>
         </div>
       `).join('');
-    }
-
-    function dragTask(ev, taskId) {
-      ev.dataTransfer.setData('task_id', String(taskId));
-    }
-
-    function allowDrop(ev) {
-      ev.preventDefault();
-    }
-
-    async function dropToStage(ev, stage) {
-      ev.preventDefault();
-      const raw = ev.dataTransfer.getData('task_id');
-      const taskId = parseInt(raw, 10);
-      if (!taskId) return;
-      const toStatus = targetStatusForStage(stage);
-      await moveTask(taskId, toStatus, `drag to ${stage}`, false);
     }
 
     async function openTask(taskId) {
@@ -686,6 +673,29 @@ INDEX_HTML = """<!doctype html>
 </html>
 """
 
+WEB_ROOT = Path(__file__).resolve().parent / "web"
+CONSOLE_TEMPLATE_PATH = WEB_ROOT / "templates" / "console.html"
+CONSOLE_CSS_PATH = WEB_ROOT / "static" / "console.css"
+CONSOLE_JS_PATH = WEB_ROOT / "static" / "console.js"
+
+
+def _read_text_or_fallback(path: Path, fallback: str) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return fallback
+
+
+def _load_console_html(asset_version: str) -> str:
+    html = _read_text_or_fallback(CONSOLE_TEMPLATE_PATH, INDEX_HTML)
+    return html.replace("{{ASSET_VERSION}}", asset_version)
+
+
+# Keep this symbol for tests/backward-compatibility, now sourced from template files.
+INDEX_HTML = _load_console_html("dev")
+CONSOLE_CSS = _read_text_or_fallback(CONSOLE_CSS_PATH, "")
+CONSOLE_JS = _read_text_or_fallback(CONSOLE_JS_PATH, "")
+
 
 def _task_to_dict(task: Any) -> dict[str, Any]:
     if hasattr(task, "__dataclass_fields__"):
@@ -893,8 +903,23 @@ def _build_handler(
     discovery: IssueDiscoveryService,
     webhook: GithubCommentWebhookService,
     github_webhook_secret: str | None,
+    *,
+    reload_assets: bool = False,
 ):
     broker = EventStreamBroker(store)
+    asset_version = str(int(time.time()))
+    html_cache = _load_console_html(asset_version)
+    css_cache = _read_text_or_fallback(CONSOLE_CSS_PATH, CONSOLE_CSS)
+    js_cache = _read_text_or_fallback(CONSOLE_JS_PATH, CONSOLE_JS)
+
+    def _current_html() -> str:
+        return _load_console_html(str(int(time.time()))) if reload_assets else html_cache
+
+    def _current_css() -> str:
+        return _read_text_or_fallback(CONSOLE_CSS_PATH, css_cache) if reload_assets else css_cache
+
+    def _current_js() -> str:
+        return _read_text_or_fallback(CONSOLE_JS_PATH, js_cache) if reload_assets else js_cache
 
     def _on_async_run_finished(project: str, task_id: int, run: Any) -> None:
         payload = {
@@ -922,6 +947,16 @@ def _build_handler(
             data = html.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _send_text(self, text: str, content_type: str) -> None:
+            data = text.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -942,7 +977,15 @@ def _build_handler(
             query = parse_qs(parsed.query)
 
             if path == "/":
-                self._send_html(INDEX_HTML)
+                self._send_html(_current_html())
+                return
+
+            if path == "/static/console.css":
+                self._send_text(_current_css(), "text/css; charset=utf-8")
+                return
+
+            if path == "/static/console.js":
+                self._send_text(_current_js(), "application/javascript; charset=utf-8")
                 return
 
             if path == "/api/projects":
@@ -1434,17 +1477,26 @@ def serve_console(
     port: int,
     db_path: str,
     github_webhook_secret: str | None = None,
+    reload: bool = False,
 ) -> None:
     store = Store(db_path)
     registry = AdapterRegistry()
     runner = Runner(store, registry)
     discovery = IssueDiscoveryService(store)
     webhook = GithubCommentWebhookService(store, runner)
-    handler = _build_handler(store, runner, discovery, webhook, github_webhook_secret)
+    handler = _build_handler(
+        store,
+        runner,
+        discovery,
+        webhook,
+        github_webhook_secret,
+        reload_assets=reload,
+    )
     server = ThreadingHTTPServer((host, port), handler)
     print(f"AgentFlow console running on http://{host}:{port}")
     print(f"Using db: {db_path}")
     print(f"GitHub webhook secret: {'enabled' if github_webhook_secret else 'disabled'}")
+    print(f"Template reload: {'enabled' if reload else 'disabled'}")
     if host not in {"127.0.0.1", "localhost"}:
         print("WARNING: non-localhost bind detected; gate commands are project-controlled shell commands.")
     try:

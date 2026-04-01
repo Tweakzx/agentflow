@@ -166,6 +166,12 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(args.host, "127.0.0.1")
         self.assertEqual(args.port, 8787)
         self.assertIsNone(args.github_webhook_secret)
+        self.assertFalse(args.reload)
+
+    def test_serve_command_parser_reload_flag(self) -> None:
+        args = _parser().parse_args(["serve", "--reload"])
+        self.assertEqual(args.command, "serve")
+        self.assertTrue(args.reload)
 
     def test_sync_issues_parser(self) -> None:
         args = _parser().parse_args(["sync-issues", "--project", "demo", "--repo", "owner/repo"])
