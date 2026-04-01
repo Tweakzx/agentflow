@@ -61,7 +61,7 @@ def _parser() -> argparse.ArgumentParser:
     p_release = sub.add_parser("release", help="Release a claimed task")
     p_release.add_argument("task_id", type=int)
     p_release.add_argument("--agent", required=True)
-    p_release.add_argument("--to-status", default="approved")
+    p_release.add_argument("--to-status", default="ready")
     p_release.add_argument("--note")
 
     p_workers = sub.add_parser("workers", help="List in-progress tasks with assigned agents")

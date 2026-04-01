@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     project_id INTEGER NOT NULL,
     title TEXT NOT NULL,
     description TEXT,
-    status TEXT NOT NULL DEFAULT 'pending',
+    status TEXT NOT NULL DEFAULT 'todo',
     priority INTEGER NOT NULL DEFAULT 3 CHECK(priority BETWEEN 1 AND 5),
     impact INTEGER NOT NULL DEFAULT 3 CHECK(impact BETWEEN 1 AND 5),
     effort INTEGER NOT NULL DEFAULT 3 CHECK(effort BETWEEN 1 AND 5),
@@ -139,5 +139,47 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN assigned_agent TEXT")
     if not _column_exists(conn, "tasks", "lease_until"):
         conn.execute("ALTER TABLE tasks ADD COLUMN lease_until TEXT")
+
+    # Normalize legacy status names into the current lifecycle model.
+    conn.execute(
+        """
+        UPDATE tasks
+        SET status = CASE status
+            WHEN 'pending' THEN 'todo'
+            WHEN 'approved' THEN 'ready'
+            WHEN 'pr_ready' THEN 'review'
+            WHEN 'pr_open' THEN 'review'
+            WHEN 'merged' THEN 'done'
+            WHEN 'skipped' THEN 'dropped'
+            WHEN 'triaged' THEN 'ready'
+            ELSE status
+        END
+        """
+    )
+    conn.execute(
+        """
+        UPDATE status_history
+        SET from_status = CASE from_status
+            WHEN 'pending' THEN 'todo'
+            WHEN 'approved' THEN 'ready'
+            WHEN 'pr_ready' THEN 'review'
+            WHEN 'pr_open' THEN 'review'
+            WHEN 'merged' THEN 'done'
+            WHEN 'skipped' THEN 'dropped'
+            WHEN 'triaged' THEN 'ready'
+            ELSE from_status
+        END,
+        to_status = CASE to_status
+            WHEN 'pending' THEN 'todo'
+            WHEN 'approved' THEN 'ready'
+            WHEN 'pr_ready' THEN 'review'
+            WHEN 'pr_open' THEN 'review'
+            WHEN 'merged' THEN 'done'
+            WHEN 'skipped' THEN 'dropped'
+            WHEN 'triaged' THEN 'ready'
+            ELSE to_status
+        END
+        """
+    )
 
     conn.commit()
