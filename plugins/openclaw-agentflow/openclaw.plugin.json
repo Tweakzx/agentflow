@@ -3,8 +3,6 @@
   "name": "AgentFlow",
   "version": "0.2.0",
   "description": "Self-describing AgentFlow bridge for OpenClaw: capabilities discovery, queue execution, and webhook ingress.",
-  "kind": "non-capability",
-  "entry": "./index.ts",
   "configSchema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "type": "object",

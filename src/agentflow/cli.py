@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -68,6 +69,7 @@ def _parser() -> argparse.ArgumentParser:
     p_move = sub.add_parser("move", help="Move task status")
     p_move.add_argument("task_id", type=int)
     p_move.add_argument("to_status")
+    p_move.add_argument("--project")
     p_move.add_argument("--note")
 
     p_stats = sub.add_parser("stats", help="Show status counts")
@@ -149,6 +151,11 @@ def _parser() -> argparse.ArgumentParser:
     p_comment.add_argument("--adapter", default="mock")
     p_comment.add_argument("--agent", required=True)
 
+    # Also accept `--db` after subcommands for compatibility with README examples.
+    # Use SUPPRESS so subparser defaults don't override a top-level `--db` value.
+    for child in sub.choices.values():
+        child.add_argument("--db", dest="db", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+
     return parser
 
 
@@ -224,6 +231,16 @@ def main() -> None:
         if task is None:
             print("no claimable task")
         else:
+            run_id = store.create_run(
+                task_id=task.id,
+                project=args.project,
+                trigger_type="manual",
+                trigger_ref="cli:claim-next",
+                adapter="manual",
+                agent_name=args.agent,
+                idempotency_key=f"{args.project}:{task.id}:claim-next:{args.agent}:{time.time_ns()}",
+            )
+            store.append_run_step(run_id, "claim", "passed", f"claimed by {args.agent} via cli")
             _print_tasks([task])
         return
 
@@ -243,6 +260,14 @@ def main() -> None:
         return
 
     if args.command == "move":
+        if args.project:
+            task = store.get_task(args.task_id)
+            if task is None:
+                raise ValueError(f"Task {args.task_id} not found")
+            if task.project != args.project:
+                raise ValueError(
+                    f"Task {args.task_id} belongs to project '{task.project}', not '{args.project}'"
+                )
         store.move_task(args.task_id, args.to_status, args.note)
         print(f"task {args.task_id} moved to {args.to_status}")
         return
