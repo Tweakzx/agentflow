@@ -16,5 +16,8 @@
     "control-plane",
     "automation"
   ],
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.41"
+  },
   "license": "MIT"
 }
