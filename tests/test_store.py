@@ -193,6 +193,22 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(1, len(rows))
         self.assertEqual("progress", rows[0]["event"])
 
+    def test_terminal_status_cannot_reopen(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="terminal-state-test",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        self.store.move_task(task_id, "skipped", "out of scope")
+        with self.assertRaisesRegex(ValueError, "Transition not allowed"):
+            self.store.move_task(task_id, "pending", "reopen")
+
 
 if __name__ == "__main__":
     unittest.main()

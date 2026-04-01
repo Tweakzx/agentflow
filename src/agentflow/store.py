@@ -22,6 +22,16 @@ STATUSES = {
 
 ACTIVE_STATUSES = {"pending", "approved", "in_progress", "pr_ready", "pr_open", "blocked"}
 CLAIMABLE_STATUSES = {"pending", "approved"}
+ALLOWED_TRANSITIONS = {
+    "pending": {"approved", "blocked", "skipped"},
+    "approved": {"pending", "in_progress", "blocked", "skipped"},
+    "in_progress": {"approved", "pr_ready", "blocked"},
+    "pr_ready": {"approved", "pr_open", "blocked"},
+    "pr_open": {"approved", "merged", "blocked"},
+    "blocked": {"pending", "approved", "skipped"},
+    "merged": set(),
+    "skipped": set(),
+}
 
 
 class _ManagedConnection(sqlite3.Connection):
@@ -620,7 +630,8 @@ class Store:
             row = conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
             if row is None:
                 raise ValueError(f"Task {task_id} not found")
-            from_status = row["status"]
+            from_status = str(row["status"])
+            self._validate_transition(from_status, to_status)
             conn.execute(
                 """
                 UPDATE tasks
@@ -636,6 +647,13 @@ class Store:
                 "INSERT INTO status_history(task_id, from_status, to_status, note) VALUES(?, ?, ?, ?)",
                 (task_id, from_status, to_status, note),
             )
+
+    def _validate_transition(self, from_status: str, to_status: str) -> None:
+        next_set = ALLOWED_TRANSITIONS.get(from_status)
+        if next_set is None:
+            raise ValueError(f"Unknown current status: {from_status}")
+        if to_status not in next_set:
+            raise ValueError(f"Transition not allowed: {from_status} -> {to_status}")
 
     def list_in_progress(self, project: str | None = None) -> list[Task]:
         with self.connect() as conn:
