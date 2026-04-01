@@ -177,6 +177,36 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIn("error: Invalid status", err)
         self.assertNotIn("Traceback", err)
 
+    def test_export_md_accepts_project_flag(self) -> None:
+        args = _parser().parse_args(["export-md", "--out", self.tempdir.name, "--project", "demo"])
+        self.assertEqual(args.command, "export-md")
+        self.assertEqual(args.project, "demo")
+
+    def test_export_md_project_outputs_single_board(self) -> None:
+        second = Store(str(self.db))
+        second.create_project("other", "example/other")
+        second.add_task(
+            project="other",
+            title="other-task",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        out_dir = Path(self.tempdir.name) / "exports"
+        output = self._run_cli("export-md", "--out", str(out_dir), "--project", "demo")
+        self.assertIn("demo-board.md", output)
+        self.assertTrue((out_dir / "demo-board.md").exists())
+        self.assertFalse((out_dir / "other-board.md").exists())
+
+    def test_export_md_project_rejects_unknown_project(self) -> None:
+        out_dir = Path(self.tempdir.name) / "exports-missing"
+        output = self._run_cli("export-md", "--out", str(out_dir), "--project", "missing")
+        self.assertEqual(output.strip(), "no projects found")
+        self.assertFalse((out_dir / "missing-board.md").exists())
+
     def test_db_flag_supported_before_and_after_subcommand(self) -> None:
         args_before = _parser().parse_args(["--db", "/tmp/a.db", "init"])
         args_after = _parser().parse_args(["init", "--db", "/tmp/b.db"])
@@ -185,8 +215,8 @@ class CliSmokeTests(unittest.TestCase):
 
     def test_move_supports_project_flag_and_checks_membership(self) -> None:
         self.store.move_task(self.task_id, "approved", "prepare move test")
-        move_ok = self._run_cli("move", str(self.task_id), "merged", "--project", "demo")
-        self.assertIn("moved to merged", move_ok)
+        move_ok = self._run_cli("move", str(self.task_id), "in_progress", "--project", "demo")
+        self.assertIn("moved to in_progress", move_ok)
 
         # Move it back for mismatch check.
         self.store.move_task(self.task_id, "approved", "prepare mismatch test")
@@ -198,7 +228,7 @@ class CliSmokeTests(unittest.TestCase):
             str(self.db),
             "move",
             str(self.task_id),
-            "merged",
+            "in_progress",
             "--project",
             "other",
         ]
