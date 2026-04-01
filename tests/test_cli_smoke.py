@@ -76,6 +76,25 @@ class CliSmokeTests(unittest.TestCase):
         )
         return proc.stdout
 
+    def _run_cli_rc(self, *args: str) -> tuple[int, str, str]:
+        cmd = [
+            "python3",
+            "-m",
+            "agentflow.cli",
+            "--db",
+            str(self.db),
+            *args,
+        ]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "src"},
+            cwd="/home/shawn/github/agentflow",
+            check=False,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
     def test_runs_and_steps_commands(self) -> None:
         runs_out = self._run_cli("runs", "--task-id", str(self.task_id))
         steps_out = self._run_cli("run-steps", str(self.run_id))
@@ -152,6 +171,12 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(args.project, "demo")
         self.assertEqual(args.repo, "owner/repo")
 
+    def test_move_invalid_status_returns_friendly_error(self) -> None:
+        rc, _out, err = self._run_cli_rc("move", str(self.task_id), "not_a_status")
+        self.assertEqual(1, rc)
+        self.assertIn("error: Invalid status", err)
+        self.assertNotIn("Traceback", err)
+
     def test_export_md_accepts_project_flag(self) -> None:
         args = _parser().parse_args(["export-md", "--out", self.tempdir.name, "--project", "demo"])
         self.assertEqual(args.command, "export-md")
@@ -190,8 +215,8 @@ class CliSmokeTests(unittest.TestCase):
 
     def test_move_supports_project_flag_and_checks_membership(self) -> None:
         self.store.move_task(self.task_id, "approved", "prepare move test")
-        move_ok = self._run_cli("move", str(self.task_id), "merged", "--project", "demo")
-        self.assertIn("moved to merged", move_ok)
+        move_ok = self._run_cli("move", str(self.task_id), "in_progress", "--project", "demo")
+        self.assertIn("moved to in_progress", move_ok)
 
         # Move it back for mismatch check.
         self.store.move_task(self.task_id, "approved", "prepare mismatch test")
@@ -203,7 +228,7 @@ class CliSmokeTests(unittest.TestCase):
             str(self.db),
             "move",
             str(self.task_id),
-            "merged",
+            "in_progress",
             "--project",
             "other",
         ]

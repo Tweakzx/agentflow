@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -260,15 +261,19 @@ def main() -> None:
         return
 
     if args.command == "move":
-        if args.project:
-            task = store.get_task(args.task_id)
-            if task is None:
-                raise ValueError(f"Task {args.task_id} not found")
-            if task.project != args.project:
-                raise ValueError(
-                    f"Task {args.task_id} belongs to project '{task.project}', not '{args.project}'"
-                )
-        store.move_task(args.task_id, args.to_status, args.note)
+        try:
+            if args.project:
+                task = store.get_task(args.task_id)
+                if task is None:
+                    raise ValueError(f"Task {args.task_id} not found")
+                if task.project != args.project:
+                    raise ValueError(
+                        f"Task {args.task_id} belongs to project '{task.project}', not '{args.project}'"
+                    )
+            store.move_task(args.task_id, args.to_status, args.note)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
         print(f"task {args.task_id} moved to {args.to_status}")
         return
 
