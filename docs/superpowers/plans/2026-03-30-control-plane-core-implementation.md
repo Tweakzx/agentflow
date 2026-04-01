@@ -23,7 +23,7 @@ Add tests for creating a run, appending steps, and finalizing run status.
 
 - [x] **Step 2: Run tests and verify failure**
 
-Run: `cd /home/shawn/github/agentflow && PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v`
+Run: `cd "$(git rev-parse --show-toplevel)" && PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v`
 Expected: FAIL on missing run ledger methods/tables.
 
 - [x] **Step 3: Add schema tables for run ledger**
@@ -132,7 +132,7 @@ git commit -m "feat: add run inspection and gate profile CLI commands"
 - [x] **Step 1: Execute end-to-end verification script**
 
 Run:
-`cd /home/shawn/github/agentflow && PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v`
+`cd "$(git rev-parse --show-toplevel)" && PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v`
 
 Expected: All tests pass.
 

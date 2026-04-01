@@ -128,14 +128,14 @@ Open `http://127.0.0.1:8787`.
 ## Testing
 
 ```bash
-cd /home/shawn/github/agentflow
+cd "$(git rev-parse --show-toplevel)"
 PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 PR-blocking E2E suite (same entry used by GitHub Actions):
 
 ```bash
-cd /home/shawn/github/agentflow
+cd "$(git rev-parse --show-toplevel)"
 ./scripts/run_pr_blocking_e2e.sh
 ```
 
