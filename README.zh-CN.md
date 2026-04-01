@@ -128,7 +128,7 @@ agentflow serve --db ./data/agentflow.db --host 127.0.0.1 --port 8787
 ## 测试
 
 ```bash
-cd /home/shawn/github/agentflow
+cd "$(git rev-parse --show-toplevel)"
 PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 

@@ -10,6 +10,8 @@ from pathlib import Path
 from agentflow.cli import _parser
 from agentflow.store import Store
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 class CliSmokeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -71,7 +73,7 @@ class CliSmokeTests(unittest.TestCase):
             capture_output=True,
             text=True,
             env={**os.environ, "PYTHONPATH": "src"},
-            cwd="/home/shawn/github/agentflow",
+            cwd=str(REPO_ROOT),
             check=True,
         )
         return proc.stdout
@@ -90,7 +92,7 @@ class CliSmokeTests(unittest.TestCase):
             capture_output=True,
             text=True,
             env={**os.environ, "PYTHONPATH": "src"},
-            cwd="/home/shawn/github/agentflow",
+            cwd=str(REPO_ROOT),
             check=False,
         )
         return proc.returncode, proc.stdout, proc.stderr
@@ -237,11 +239,27 @@ class CliSmokeTests(unittest.TestCase):
             capture_output=True,
             text=True,
             env={**os.environ, "PYTHONPATH": "src"},
-            cwd="/home/shawn/github/agentflow",
+            cwd=str(REPO_ROOT),
             check=False,
         )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("belongs to project 'demo'", proc.stderr)
+
+    def test_cli_subprocess_uses_dynamic_repo_root_cwd(self) -> None:
+        original = subprocess.run
+        captured: dict[str, object] = {}
+
+        def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            captured["cwd"] = kwargs.get("cwd")
+            return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
+
+        subprocess.run = fake_run  # type: ignore[assignment]
+        try:
+            self._run_cli("board", "--project", "demo")
+        finally:
+            subprocess.run = original  # type: ignore[assignment]
+
+        self.assertEqual(str(REPO_ROOT), captured["cwd"])
 
 
 if __name__ == "__main__":
