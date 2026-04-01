@@ -390,25 +390,31 @@ function registerCommandCompat(api: any, spec: CompatCommandDef): void {
 
 function parseQueryObject(rawUrl: string | undefined): Record<string, string> {
   if (!rawUrl) return {};
-  try {
-    const parsed = new URL(rawUrl, "http://127.0.0.1");
-    const out: Record<string, string> = {};
-    for (const [k, v] of parsed.searchParams.entries()) out[k] = v;
-    return out;
-  } catch {
-    return {};
+  const qmark = rawUrl.indexOf("?");
+  if (qmark < 0) return {};
+  const query = rawUrl.slice(qmark + 1);
+  const out: Record<string, string> = {};
+  for (const part of query.split("&")) {
+    if (!part) continue;
+    const idx = part.indexOf("=");
+    const k = idx >= 0 ? part.slice(0, idx) : part;
+    const v = idx >= 0 ? part.slice(idx + 1) : "";
+    if (!k) continue;
+    out[decodeURIComponent(k)] = decodeURIComponent(v);
   }
+  return out;
 }
 
 async function readJsonBody(req: any): Promise<any> {
   if (req && typeof req === "object" && "body" in req) return req.body ?? {};
-  const chunks: Buffer[] = [];
+  let text = "";
   await new Promise<void>((resolve, reject) => {
-    req.on("data", (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))));
+    req.on("data", (chunk: any) => {
+      text += typeof chunk === "string" ? chunk : String(chunk ?? "");
+    });
     req.on("end", () => resolve());
     req.on("error", (err: unknown) => reject(err));
   });
-  const text = Buffer.concat(chunks).toString("utf-8");
   if (!text.trim()) return {};
   try {
     return JSON.parse(text);
