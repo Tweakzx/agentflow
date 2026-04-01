@@ -105,7 +105,7 @@ class Runner:
             self.store.finalize_run(
                 run_id,
                 "failed",
-                gate_passed=False,
+                gate_passed=gate_passed,
                 result_summary=message,
                 error_code=error_code,
             )

@@ -118,6 +118,12 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIsInstance(board_data, list)
         self.assertIn("task", detail_data)
 
+    def test_claim_next_creates_running_run(self) -> None:
+        out = self._run_cli("claim-next", "--project", "demo", "--agent", "worker-x")
+        self.assertIn("in_progress", out)
+        runs = self.store.list_runs(self.task_id)
+        self.assertTrue(any(str(r["status"]) == "running" for r in runs))
+
     def test_triggers_and_gate_profile_commands(self) -> None:
         trig_out = self._run_cli("triggers", "--project", "demo")
         gate_out = self._run_cli("gate-profile", "--project", "demo")
@@ -170,6 +176,42 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(1, rc)
         self.assertIn("error: Invalid status", err)
         self.assertNotIn("Traceback", err)
+
+    def test_db_flag_supported_before_and_after_subcommand(self) -> None:
+        args_before = _parser().parse_args(["--db", "/tmp/a.db", "init"])
+        args_after = _parser().parse_args(["init", "--db", "/tmp/b.db"])
+        self.assertEqual(args_before.db, "/tmp/a.db")
+        self.assertEqual(args_after.db, "/tmp/b.db")
+
+    def test_move_supports_project_flag_and_checks_membership(self) -> None:
+        self.store.move_task(self.task_id, "approved", "prepare move test")
+        move_ok = self._run_cli("move", str(self.task_id), "merged", "--project", "demo")
+        self.assertIn("moved to merged", move_ok)
+
+        # Move it back for mismatch check.
+        self.store.move_task(self.task_id, "approved", "prepare mismatch test")
+        cmd = [
+            "python3",
+            "-m",
+            "agentflow.cli",
+            "--db",
+            str(self.db),
+            "move",
+            str(self.task_id),
+            "merged",
+            "--project",
+            "other",
+        ]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "src"},
+            cwd="/home/shawn/github/agentflow",
+            check=False,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("belongs to project 'demo'", proc.stderr)
 
 
 if __name__ == "__main__":
