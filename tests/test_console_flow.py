@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agentflow.console import (
     EventStreamBroker,
+    INDEX_HTML,
     _create_task_from_payload,
     _flow_stage_for_status,
     _latest_running_run_id,
@@ -140,6 +141,13 @@ class ConsoleFlowTests(unittest.TestCase):
             self.assertIsNotNone(task)
             assert task is not None
             self.assertEqual("create via api", task.title)
+
+    def test_console_boot_error_ui_has_retry(self) -> None:
+        self.assertIn("Console load failed", INDEX_HTML)
+        self.assertIn("window.location.reload()", INDEX_HTML)
+
+    def test_refresh_all_reloads_projects_when_none_selected(self) -> None:
+        self.assertIn("if (!currentProject()) {\n        await loadProjects();", INDEX_HTML)
 
 
 if __name__ == '__main__':

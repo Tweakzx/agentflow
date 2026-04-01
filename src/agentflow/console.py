@@ -307,6 +307,9 @@ INDEX_HTML = """<!doctype html>
       const sel = document.getElementById('projectSelect');
       const current = sel.value;
       sel.innerHTML = state.projects.map(p => `<option value=\"${p}\">${p}</option>`).join('');
+      if (!state.projects.length) {
+        return;
+      }
       if (current && state.projects.includes(current)) sel.value = current;
       sel.onchange = async () => {
         await refreshAll();
@@ -545,6 +548,15 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function refreshAll() {
+      if (!currentProject()) {
+        await loadProjects();
+      }
+      if (!currentProject()) {
+        document.getElementById('taskList').innerHTML = '<div class=\"task\"><span class=\"sub\">No projects yet. Create one via CLI first.</span></div>';
+        document.getElementById('recentRuns').innerHTML = '<div class=\"item sub\">No project selected.</div>';
+        document.getElementById('auditList').innerHTML = '<div class=\"item sub\">No project selected.</div>';
+        return;
+      }
       await loadTasks();
       await loadStatsAndRuns();
       if (state.selectedTask) {
@@ -637,9 +649,20 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function boot() {
-      await loadProjects();
-      await refreshAll();
-      restartStream();
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await loadProjects();
+          await refreshAll();
+          restartStream();
+          return;
+        } catch (err) {
+          lastErr = err;
+          const delay = 1000 * Math.pow(2, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+      throw lastErr || new Error('boot failed');
     }
 
     window.addEventListener('beforeunload', () => {
@@ -648,7 +671,13 @@ INDEX_HTML = """<!doctype html>
     });
 
     boot().catch(err => {
-      document.body.innerHTML = `<pre class=\"err\">Failed to load console: ${err}</pre>`;
+      document.body.innerHTML = `
+        <div style=\"padding:24px\">
+          <h3 style=\"margin:0 0 10px\">Console load failed</h3>
+          <pre class=\"err\" style=\"white-space:pre-wrap\">${String(err)}</pre>
+          <button class=\"secondary\" onclick=\"window.location.reload()\">Retry</button>
+        </div>
+      `;
     });
   </script>
 </body>
