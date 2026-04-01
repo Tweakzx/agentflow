@@ -132,6 +132,13 @@ cd /home/shawn/github/agentflow
 PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
+PR-blocking E2E suite (same entry used by GitHub Actions):
+
+```bash
+cd /home/shawn/github/agentflow
+./scripts/run_pr_blocking_e2e.sh
+```
+
 ## Plugin Packaging
 
 - OpenClaw native plugin: `plugins/openclaw-agentflow/`
