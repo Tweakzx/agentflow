@@ -30,6 +30,13 @@ type CapabilityDoc = {
   workflow: string[];
 };
 
+type LegacyToolDef = {
+  id: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  run: (input: any) => Promise<any>;
+};
+
 async function runAgentflow(args: string[]): Promise<{ stdout: string; stderr: string }> {
   const { stdout, stderr } = await execFileAsync("python3", ["-m", "agentflow.cli", ...args], {
     env: { ...process.env, PYTHONPATH: "src" },
@@ -215,6 +222,46 @@ function formatHelpText(doc: CapabilityDoc, mode: string): string {
   return JSON.stringify(doc, null, 2);
 }
 
+function toolTextPayload(raw: any): string {
+  if (raw && typeof raw === "object") {
+    if (typeof raw.content === "string") return raw.content;
+    if (Array.isArray(raw.content)) {
+      const textParts = raw.content
+        .filter((x) => x && typeof x === "object" && x.type === "text")
+        .map((x) => String(x.text || ""));
+      if (textParts.length) return textParts.join("\n");
+    }
+  }
+  if (typeof raw === "string") return raw;
+  return JSON.stringify(raw ?? {});
+}
+
+function toolDataPayload(raw: any): unknown {
+  if (raw && typeof raw === "object" && "data" in raw) return raw.data;
+  return undefined;
+}
+
+function registerToolCompat(api: any, spec: LegacyToolDef): void {
+  const canonical = {
+    name: spec.id,
+    description: spec.description,
+    parameters: spec.inputSchema,
+    async execute(_id: string, params: any) {
+      const raw = await spec.run(params ?? {});
+      const text = toolTextPayload(raw);
+      const data = toolDataPayload(raw);
+      return data !== undefined
+        ? { content: [{ type: "text", text }], data }
+        : { content: [{ type: "text", text }] };
+    },
+  };
+  try {
+    api.registerTool?.(canonical);
+  } catch {
+    api.registerTool?.(spec);
+  }
+}
+
 export default definePluginEntry({
   id: "agentflow",
   name: "AgentFlow",
@@ -346,7 +393,7 @@ export default definePluginEntry({
       }
     });
 
-    api.registerTool?.({
+    registerToolCompat(api, {
       id: "agentflow_status",
       description: "Read AgentFlow queue status",
       inputSchema: {
@@ -363,7 +410,7 @@ export default definePluginEntry({
       }
     });
 
-    api.registerTool?.({
+    registerToolCompat(api, {
       id: "agentflow_capabilities",
       description: "Describe AgentFlow plugin capabilities, routes, and usage",
       inputSchema: {
@@ -381,7 +428,7 @@ export default definePluginEntry({
       }
     });
 
-    api.registerTool?.({
+    registerToolCompat(api, {
       id: "agentflow_create_task",
       description: "Create a task in AgentFlow",
       inputSchema: {
@@ -420,7 +467,7 @@ export default definePluginEntry({
       }
     });
 
-    api.registerTool?.({
+    registerToolCompat(api, {
       id: "agentflow_move_task",
       description: "Move task to another status",
       inputSchema: {
@@ -440,7 +487,7 @@ export default definePluginEntry({
       }
     });
 
-    api.registerTool?.({
+    registerToolCompat(api, {
       id: "agentflow_task_detail",
       description: "Read one task detail",
       inputSchema: {
@@ -455,7 +502,7 @@ export default definePluginEntry({
       }
     });
 
-    api.registerTool?.({
+    registerToolCompat(api, {
       id: "agentflow_recent_runs",
       description: "Read recent runs for a project",
       inputSchema: {
@@ -483,7 +530,7 @@ export default definePluginEntry({
       }
     });
 
-    api.registerTool?.({
+    registerToolCompat(api, {
       id: "agentflow_audit",
       description: "Read recent status transition events",
       inputSchema: {
