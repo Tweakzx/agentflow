@@ -184,6 +184,27 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(task_id, int(events[0]["task_id"]))
         self.assertEqual("status-history-test", events[0]["task_title"])
 
+    def test_done_alias_maps_to_merged(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="done-alias",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        self.store.move_task(task_id, "approved", "triaged")
+        self.store.move_task(task_id, "in_progress", "work started")
+        self.store.move_task(task_id, "pr_ready", "ready for review")
+        self.store.move_task(task_id, "pr_open", "review opened")
+        self.store.move_task(task_id, "done", "finalized")
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertEqual("merged", task.status)
+
     def test_event_persistence(self) -> None:
         self.store.create_project("demo", "example/demo")
         first_id = self.store.append_event("demo", "task_update", {"task_id": 1, "status": "pending"})

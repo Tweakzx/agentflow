@@ -32,6 +32,7 @@ ALLOWED_TRANSITIONS = {
     "merged": set(),
     "skipped": set(),
 }
+STATUS_ALIASES = {"done": "merged"}
 
 
 class _ManagedConnection(sqlite3.Connection):
@@ -594,8 +595,7 @@ class Store:
             return cur.rowcount > 0
 
     def release_claim(self, task_id: int, agent: str, to_status: str = "approved", note: str | None = None) -> bool:
-        if to_status not in STATUSES:
-            raise ValueError(f"Invalid status: {to_status}")
+        to_status = self._normalize_status(to_status)
 
         with self.connect() as conn:
             row = conn.execute(
@@ -624,8 +624,9 @@ class Store:
             return True
 
     def move_task(self, task_id: int, to_status: str, note: str | None, force: bool = False) -> None:
-        if to_status not in STATUSES:
-            raise ValueError(f"Invalid status: {to_status}")
+        to_status = self._normalize_status(to_status)
+    def move_task(self, task_id: int, to_status: str, note: str | None, force: bool = False) -> None:
+        to_status = self._normalize_status(to_status)
         with self.connect() as conn:
             row = conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
             if row is None:
@@ -655,6 +656,14 @@ class Store:
             raise ValueError(f"Unknown current status: {from_status}")
         if to_status not in next_set:
             raise ValueError(f"Transition not allowed: {from_status} -> {to_status}")
+
+    def _normalize_status(self, status: str) -> str:
+        normalized = STATUS_ALIASES.get(status, status)
+        if normalized not in STATUSES:
+            valid = ", ".join(sorted(STATUSES))
+            aliases = ", ".join(f"{k}->{v}" for k, v in sorted(STATUS_ALIASES.items()))
+            raise ValueError(f"Invalid status: {status}. Valid statuses: {valid}. Aliases: {aliases}")
+        return normalized
 
     def list_in_progress(self, project: str | None = None) -> list[Task]:
         with self.connect() as conn:
