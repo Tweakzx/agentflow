@@ -67,15 +67,15 @@ class Store:
         self._schema_lock = threading.Lock()
 
     def connect(self) -> sqlite3.Connection:
+        if not self._schema_ready:
+            with self._schema_lock:
+                if not self._schema_ready:
+                    ensure_schema(self.db_path)
+                    self._schema_ready = True
         conn = sqlite3.connect(self.db_path, factory=_ManagedConnection)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
-        if not self._schema_ready:
-            with self._schema_lock:
-                if not self._schema_ready:
-                    ensure_schema(conn)
-                    self._schema_ready = True
         return conn
 
     def create_project(self, name: str, repo_full_name: str | None) -> None:

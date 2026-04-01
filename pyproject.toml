@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Tweakzx" }]
 license = { text = "MIT" }
-dependencies = []
+dependencies = ["alembic>=1.18.0"]
 
 [project.scripts]
 agentflow = "agentflow.cli:main"

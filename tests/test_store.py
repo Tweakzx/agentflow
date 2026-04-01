@@ -322,6 +322,120 @@ class StoreTests(unittest.TestCase):
         claimed = legacy_store.claim_next_task("demo", "worker-a")
         self.assertIsNotNone(claimed)
 
+    def test_legacy_database_bootstraps_via_alembic(self) -> None:
+        db_path = Path(self.tempdir.name) / "legacy-bootstrap.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    repo_full_name TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    priority INTEGER NOT NULL DEFAULT 3 CHECK(priority BETWEEN 1 AND 5),
+                    impact INTEGER NOT NULL DEFAULT 3 CHECK(impact BETWEEN 1 AND 5),
+                    effort INTEGER NOT NULL DEFAULT 3 CHECK(effort BETWEEN 1 AND 5),
+                    source TEXT,
+                    external_id TEXT,
+                    branch TEXT,
+                    pr_url TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE status_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    from_status TEXT,
+                    to_status TEXT NOT NULL,
+                    note TEXT,
+                    changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO projects(name, repo_full_name) VALUES('demo', 'example/demo');
+                INSERT INTO tasks(project_id, title, description, status, priority, impact, effort, source, external_id)
+                VALUES(1, 'legacy-task', NULL, 'pending', 3, 3, 2, NULL, NULL);
+                INSERT INTO status_history(task_id, from_status, to_status, note)
+                VALUES(1, 'pending', 'approved', 'legacy state');
+                """
+            )
+            conn.commit()
+
+        store = Store(str(db_path))
+        with store.connect() as conn:
+            task = conn.execute("SELECT status, assigned_agent, lease_until FROM tasks WHERE id = 1").fetchone()
+            assert task is not None
+            self.assertEqual("todo", task["status"])
+            self.assertIsNone(task["assigned_agent"])
+            self.assertIsNone(task["lease_until"])
+            history = conn.execute(
+                "SELECT from_status, to_status FROM status_history WHERE task_id = 1 ORDER BY id ASC"
+            ).fetchone()
+            assert history is not None
+            self.assertEqual(("todo", "ready"), (history["from_status"], history["to_status"]))
+            version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+            assert version is not None
+            self.assertEqual("0001_bootstrap_schema", version["version_num"])
+
+    def test_versioned_database_startup_does_not_rewrite_rows(self) -> None:
+        db_path = Path(self.tempdir.name) / "versioned-no-rewrite.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    repo_full_name TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    priority INTEGER NOT NULL DEFAULT 3 CHECK(priority BETWEEN 1 AND 5),
+                    impact INTEGER NOT NULL DEFAULT 3 CHECK(impact BETWEEN 1 AND 5),
+                    effort INTEGER NOT NULL DEFAULT 3 CHECK(effort BETWEEN 1 AND 5),
+                    source TEXT,
+                    external_id TEXT,
+                    branch TEXT,
+                    pr_url TEXT,
+                    assigned_agent TEXT,
+                    lease_until TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE status_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL,
+                    from_status TEXT,
+                    to_status TEXT NOT NULL,
+                    note TEXT,
+                    changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE alembic_version (
+                    version_num VARCHAR(32) NOT NULL
+                );
+                INSERT INTO alembic_version(version_num) VALUES('0001_bootstrap_schema');
+                INSERT INTO projects(name, repo_full_name) VALUES('demo', 'example/demo');
+                INSERT INTO tasks(project_id, title, description, status, priority, impact, effort, source, external_id)
+                VALUES(1, 'legacy-task', NULL, 'pending', 3, 3, 2, NULL, NULL);
+                """
+            )
+            conn.commit()
+
+        store = Store(str(db_path))
+        with store.connect() as conn:
+            task = conn.execute("SELECT status FROM tasks WHERE id = 1").fetchone()
+            assert task is not None
+            self.assertEqual("pending", task["status"])
+
 
 if __name__ == "__main__":
     unittest.main()
