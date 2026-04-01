@@ -146,6 +146,30 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(args.project, "demo")
         self.assertEqual(args.repo, "owner/repo")
 
+    def test_export_md_accepts_project_flag(self) -> None:
+        args = _parser().parse_args(["export-md", "--out", self.tempdir.name, "--project", "demo"])
+        self.assertEqual(args.command, "export-md")
+        self.assertEqual(args.project, "demo")
+
+    def test_export_md_project_outputs_single_board(self) -> None:
+        second = Store(str(self.db))
+        second.create_project("other", "example/other")
+        second.add_task(
+            project="other",
+            title="other-task",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        out_dir = Path(self.tempdir.name) / "exports"
+        output = self._run_cli("export-md", "--out", str(out_dir), "--project", "demo")
+        self.assertIn("demo-board.md", output)
+        self.assertTrue((out_dir / "demo-board.md").exists())
+        self.assertFalse((out_dir / "other-board.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,18 +6,19 @@ from pathlib import Path
 from .store import Store
 
 
-def export_markdown(store: Store, out_dir: str) -> list[str]:
+def export_markdown(store: Store, out_dir: str, project: str | None = None) -> list[str]:
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     created: list[str] = []
 
-    for project in store.projects():
-        tasks = store.list_tasks(project)
+    projects = [project] if project else list(store.projects())
+    for project_name in projects:
+        tasks = store.list_tasks(project_name)
         status_groups: dict[str, list] = defaultdict(list)
         for t in tasks:
             status_groups[t.status].append(t)
 
-        out_path = Path(out_dir) / f"{project}-board.md"
-        lines = [f"# {project} task board", ""]
+        out_path = Path(out_dir) / f"{project_name}-board.md"
+        lines = [f"# {project_name} task board", ""]
         for status in ["pending", "approved", "in_progress", "pr_ready", "pr_open", "merged", "blocked", "skipped"]:
             lines.append(f"## {status}")
             group = status_groups.get(status, [])
