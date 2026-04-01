@@ -53,7 +53,7 @@ function isRecoverableLaunchError(err: unknown): boolean {
   const anyErr = err as { code?: string; stderr?: string };
   if (anyErr?.code === "ENOENT") return true;
   const stderr = String(anyErr?.stderr ?? "");
-  return stderr.includes("No module named agentflow");
+  return /No module named ['"]?agentflow['"]?/.test(stderr);
 }
 
 async function runAgentflow(args: string[]): Promise<{ stdout: string; stderr: string }> {
