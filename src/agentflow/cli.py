@@ -77,6 +77,7 @@ def _parser() -> argparse.ArgumentParser:
 
     p_export = sub.add_parser("export-md", help="Export project boards to Markdown")
     p_export.add_argument("--out", default="./exports")
+    p_export.add_argument("--project")
 
     p_dashboard = sub.add_parser("dashboard", help="Generate HTML dashboard")
     p_dashboard.add_argument("--out", default="./dashboard.html")
@@ -278,7 +279,7 @@ def main() -> None:
         return
 
     if args.command == "export-md":
-        created = export_markdown(store, args.out)
+        created = export_markdown(store, args.out, project=args.project)
         if not created:
             print("no projects found")
         for path in created:
