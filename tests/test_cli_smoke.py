@@ -109,7 +109,7 @@ class CliSmokeTests(unittest.TestCase):
         recent_out = self._run_cli("recent-runs", "--project", "demo", "--limit", "5")
         self.assertIn('"task"', detail_out)
         self.assertIn('"history"', detail_out)
-        self.assertIn("to=pending", audit_out)
+        self.assertIn("to=todo", audit_out)
         self.assertIn("task=", recent_out)
 
     def test_json_output_modes(self) -> None:
@@ -216,12 +216,12 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(args_after.db, "/tmp/b.db")
 
     def test_move_supports_project_flag_and_checks_membership(self) -> None:
-        self.store.move_task(self.task_id, "approved", "prepare move test")
+        self.store.move_task(self.task_id, "ready", "prepare move test")
         move_ok = self._run_cli("move", str(self.task_id), "in_progress", "--project", "demo")
         self.assertIn("moved to in_progress", move_ok)
 
         # Move it back for mismatch check.
-        self.store.move_task(self.task_id, "approved", "prepare mismatch test")
+        self.store.move_task(self.task_id, "ready", "prepare mismatch test")
         cmd = [
             "python3",
             "-m",

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { definePluginEntry } from "openclaw/plugin-sdk/core";
@@ -64,6 +64,24 @@ type CompatHttpRouteDef = {
 const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_AGENTFLOW_ROOT = process.env.AGENTFLOW_ROOT || resolve(PLUGIN_DIR, "..", "..");
 const DEFAULT_VENV_PYTHON = resolve(DEFAULT_AGENTFLOW_ROOT, ".venv", "bin", "python3");
+const CANONICAL_STATUSES = ["todo", "ready", "in_progress", "review", "done", "blocked", "dropped"] as const;
+
+function inferDefaultProject(configured?: string): string {
+  if (configured && configured.trim()) return configured.trim();
+  const fromEnv = process.env.AGENTFLOW_DEFAULT_PROJECT;
+  if (fromEnv && fromEnv.trim()) return fromEnv.trim();
+  const inferred = basename(DEFAULT_AGENTFLOW_ROOT).trim();
+  return inferred || "agentflow";
+}
+
+function validateScoreRange(name: "priority" | "impact" | "effort", value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 5) {
+    return `${name} must be an integer between 1 and 5`;
+  }
+  return null;
+}
 
 function mergePythonPath(extraPath: string): string {
   const current = process.env.PYTHONPATH;
@@ -220,9 +238,9 @@ function buildCapabilitiesDoc(config: {
             project: { type: "string" },
             title: { type: "string" },
             description: { type: "string" },
-            priority: { type: "number" },
-            impact: { type: "number" },
-            effort: { type: "number" },
+            priority: { type: "number", minimum: 1, maximum: 5 },
+            impact: { type: "number", minimum: 1, maximum: 5 },
+            effort: { type: "number", minimum: 1, maximum: 5 },
             source: { type: "string" },
             external_id: { type: "string" }
           }
@@ -236,7 +254,7 @@ function buildCapabilitiesDoc(config: {
           required: ["task_id", "to_status"],
           properties: {
             task_id: { type: "number" },
-            to_status: { type: "string" },
+            to_status: { type: "string", enum: [...CANONICAL_STATUSES, "pending", "approved", "pr_ready", "pr_open", "merged", "skipped", "triaged"] },
             note: { type: "string" }
           }
         }
@@ -479,7 +497,7 @@ export default definePluginEntry({
 
     const cfg: PluginConfig = (api?.config ?? {}) as PluginConfig;
     const dbPath = cfg.dbPath || "./data/agentflow.db";
-    const defaultProject = cfg.defaultProject || "default";
+    const defaultProject = inferDefaultProject(cfg.defaultProject);
     const defaultAdapter = cfg.defaultAdapter || "openclaw";
     const defaultAgentName = cfg.defaultAgentName || "openclaw-agent";
     const capabilitiesDoc = buildCapabilitiesDoc({
@@ -528,6 +546,13 @@ export default definePluginEntry({
       }) {
         if (!input?.title) {
           return { ok: false, output: "title is required" };
+        }
+        const scoreError =
+          validateScoreRange("priority", input.priority)
+          || validateScoreRange("impact", input.impact)
+          || validateScoreRange("effort", input.effort);
+        if (scoreError) {
+          return { ok: false, output: scoreError };
         }
         const project = input?.project || defaultProject;
         const args = ["--db", dbPath, "add-task", "--project", project, "--title", String(input.title)];
@@ -655,9 +680,9 @@ export default definePluginEntry({
           project: { type: "string", description: "Project name that owns the task." },
           title: { type: "string", description: "Task title." },
           description: { type: "string", description: "Optional task details." },
-          priority: { type: "number", description: "Priority score (higher = more urgent)." },
-          impact: { type: "number", description: "Impact score (higher = more value)." },
-          effort: { type: "number", description: "Effort estimate (higher = harder)." },
+          priority: { type: "number", minimum: 1, maximum: 5, description: "Priority score 1-5 (higher = more urgent)." },
+          impact: { type: "number", minimum: 1, maximum: 5, description: "Impact score 1-5 (higher = more value)." },
+          effort: { type: "number", minimum: 1, maximum: 5, description: "Effort score 1-5 (higher = harder)." },
           source: { type: "string", description: "Source system (e.g. github)." },
           external_id: { type: "string", description: "External issue id/reference." }
         }
@@ -672,6 +697,13 @@ export default definePluginEntry({
         source?: string;
         external_id?: string;
       }) {
+        const scoreError =
+          validateScoreRange("priority", input.priority)
+          || validateScoreRange("impact", input.impact)
+          || validateScoreRange("effort", input.effort);
+        if (scoreError) {
+          return { content: scoreError };
+        }
         const args = ["--db", dbPath, "add-task", "--project", input.project, "--title", input.title];
         if (input.description) args.push("--description", String(input.description));
         if (input.priority !== undefined) args.push("--priority", String(input.priority));
@@ -692,7 +724,11 @@ export default definePluginEntry({
         required: ["task_id", "to_status"],
         properties: {
           task_id: { type: "number", description: "Task numeric id." },
-          to_status: { type: "string", description: "Target workflow status." },
+          to_status: {
+            type: "string",
+            enum: [...CANONICAL_STATUSES, "pending", "approved", "pr_ready", "pr_open", "merged", "skipped", "triaged"],
+            description: "Target workflow status.",
+          },
           note: { type: "string", description: "Optional transition note." }
         }
       },

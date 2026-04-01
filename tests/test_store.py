@@ -92,15 +92,15 @@ class StoreTests(unittest.TestCase):
         heartbeat_ok = self.store.heartbeat(claimed.id, "codex", lease_minutes=20)
         self.assertTrue(heartbeat_ok)
 
-        wrong_release = self.store.release_claim(claimed.id, "other-agent", to_status="approved")
+        wrong_release = self.store.release_claim(claimed.id, "other-agent", to_status="ready")
         self.assertFalse(wrong_release)
 
-        release_ok = self.store.release_claim(claimed.id, "codex", to_status="approved")
+        release_ok = self.store.release_claim(claimed.id, "codex", to_status="ready")
         self.assertTrue(release_ok)
 
         tasks = self.store.list_tasks("demo")
         reset_task = [t for t in tasks if t.id == claimed.id][0]
-        self.assertEqual("approved", reset_task.status)
+        self.assertEqual("ready", reset_task.status)
         self.assertIsNone(reset_task.assigned_agent)
 
     def test_run_ledger_lifecycle(self) -> None:
@@ -177,7 +177,7 @@ class StoreTests(unittest.TestCase):
             source="github",
             external_id="9011",
         )
-        self.store.move_task(task_id, "approved", "triaged")
+        self.store.move_task(task_id, "ready", "triaged")
 
         events = self.store.list_recent_status_history("demo", limit=10)
         self.assertGreaterEqual(len(events), 2)
@@ -196,18 +196,17 @@ class StoreTests(unittest.TestCase):
             source=None,
             external_id=None,
         )
-        self.store.move_task(task_id, "approved", "triaged")
+        self.store.move_task(task_id, "ready", "triaged")
         self.store.move_task(task_id, "in_progress", "work started")
-        self.store.move_task(task_id, "pr_ready", "ready for review")
-        self.store.move_task(task_id, "pr_open", "review opened")
+        self.store.move_task(task_id, "review", "ready for review")
         self.store.move_task(task_id, "done", "finalized")
         task = self.store.get_task(task_id)
         assert task is not None
-        self.assertEqual("merged", task.status)
+        self.assertEqual("done", task.status)
 
     def test_event_persistence(self) -> None:
         self.store.create_project("demo", "example/demo")
-        first_id = self.store.append_event("demo", "task_update", {"task_id": 1, "status": "pending"})
+        first_id = self.store.append_event("demo", "task_update", {"task_id": 1, "status": "todo"})
         second_id = self.store.append_event("demo", "progress", {"task_id": 1, "step": "run"})
         self.assertLess(first_id, second_id)
         rows = self.store.list_events_since("demo", first_id, limit=10)
@@ -226,9 +225,9 @@ class StoreTests(unittest.TestCase):
             source=None,
             external_id=None,
         )
-        self.store.move_task(task_id, "skipped", "out of scope")
+        self.store.move_task(task_id, "dropped", "out of scope")
         with self.assertRaisesRegex(ValueError, "Transition not allowed"):
-            self.store.move_task(task_id, "pending", "reopen")
+            self.store.move_task(task_id, "todo", "reopen")
 
     def test_force_move_task_allows_manual_override(self) -> None:
         self.store.create_project("demo", "example/demo")
@@ -243,10 +242,29 @@ class StoreTests(unittest.TestCase):
             external_id=None,
         )
         self.store.move_task(task_id, "blocked", "manual block")
-        self.store.move_task(task_id, "pr_open", "manual recovery", force=True)
+        self.store.move_task(task_id, "review", "manual recovery", force=True)
         task = self.store.get_task(task_id)
         assert task is not None
-        self.assertEqual("pr_open", task.status)
+        self.assertEqual("review", task.status)
+
+    def test_legacy_status_aliases_map_to_new_model(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="legacy-aliases",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+        self.store.move_task(task_id, "approved", "legacy-ready")
+        self.store.move_task(task_id, "pr_ready", "legacy-review")
+        self.store.move_task(task_id, "merged", "legacy-done")
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertEqual("done", task.status)
 
 
 if __name__ == "__main__":

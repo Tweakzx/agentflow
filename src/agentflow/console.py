@@ -34,8 +34,8 @@ INDEX_HTML = """<!doctype html>
       --accent: #007a6e;
       --warn: #c04848;
       --ok: #2a7b3f;
-      --c-collected: #2563eb;
-      --c-triaged: #7c3aed;
+      --c-todo: #2563eb;
+      --c-ready: #7c3aed;
       --c-executing: #0f766e;
       --c-review: #b45309;
       --c-done: #15803d;
@@ -100,20 +100,22 @@ INDEX_HTML = """<!doctype html>
       border: 1px solid transparent;
       font-weight: 600;
     }
-    .stage-collected { background: #e8f0ff; color: var(--c-collected); border-color: #bfd4ff; }
-    .stage-triaged { background: #efe9ff; color: var(--c-triaged); border-color: #d8c8ff; }
+    .stage-todo { background: #e8f0ff; color: var(--c-todo); border-color: #bfd4ff; }
+    .stage-ready { background: #efe9ff; color: var(--c-ready); border-color: #d8c8ff; }
     .stage-executing { background: #e4f7f4; color: var(--c-executing); border-color: #b5ece4; }
     .stage-review { background: #fff4e6; color: var(--c-review); border-color: #ffdcb1; }
     .stage-done { background: #e7f8ea; color: var(--c-done); border-color: #bdeec7; }
     .stage-blocked { background: #ffe8e8; color: var(--c-blocked); border-color: #ffc2c2; }
-    .status-pending, .status-approved, .status-in-progress, .status-pr-ready, .status-pr-open, .status-merged, .status-skipped, .status-blocked {
+    .status-todo, .status-ready, .status-in-progress, .status-review, .status-done, .status-dropped, .status-blocked,
+    .status-pending, .status-approved, .status-pr-ready, .status-pr-open, .status-merged, .status-skipped {
       font-weight: 600;
     }
-    .status-pending { color: var(--c-collected); }
-    .status-approved { color: var(--c-triaged); }
+    .status-todo, .status-pending { color: var(--c-todo); }
+    .status-ready, .status-approved { color: var(--c-ready); }
     .status-in-progress { color: var(--c-executing); }
-    .status-pr-ready, .status-pr-open { color: var(--c-review); }
-    .status-merged, .status-skipped { color: var(--c-done); }
+    .status-review, .status-pr-ready, .status-pr-open { color: var(--c-review); }
+    .status-done, .status-merged { color: var(--c-done); }
+    .status-dropped, .status-skipped { color: #64748b; }
     .status-blocked { color: var(--c-blocked); }
     .detail-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .detail-title { font-size: 20px; font-weight: 700; margin: 8px 0 4px; }
@@ -157,8 +159,8 @@ INDEX_HTML = """<!doctype html>
       border-bottom: 1px solid var(--line);
       font-size: 13px;
     }
-    .col.stage-collected h4 { background: #e8f0ff; }
-    .col.stage-triaged h4 { background: #efe9ff; }
+    .col.stage-todo h4 { background: #e8f0ff; }
+    .col.stage-ready h4 { background: #efe9ff; }
     .col.stage-executing h4 { background: #e4f7f4; }
     .col.stage-review h4 { background: #fff4e6; }
     .col.stage-done h4 { background: #e7f8ea; }
@@ -282,23 +284,25 @@ INDEX_HTML = """<!doctype html>
     }
 
     function stageOf(status) {
-      if (status === 'pending') return 'collected';
-      if (status === 'approved') return 'triaged';
-      if (status === 'in_progress') return 'executing';
-      if (status === 'pr_ready' || status === 'pr_open') return 'review';
-      if (status === 'merged' || status === 'skipped') return 'done';
+      if (status === 'todo' || status === 'pending') return 'todo';
+      if (status === 'ready' || status === 'approved' || status === 'triaged') return 'ready';
+      if (status === 'in_progress') return 'in_progress';
+      if (status === 'review' || status === 'pr_ready' || status === 'pr_open') return 'review';
+      if (status === 'done' || status === 'merged') return 'done';
+      if (status === 'dropped' || status === 'skipped') return 'dropped';
       if (status === 'blocked') return 'blocked';
       return 'other';
     }
 
     function targetStatusForStage(stage) {
-      if (stage === 'collected') return 'pending';
-      if (stage === 'triaged') return 'approved';
-      if (stage === 'executing') return 'in_progress';
-      if (stage === 'review') return 'pr_ready';
-      if (stage === 'done') return 'merged';
+      if (stage === 'todo') return 'todo';
+      if (stage === 'ready') return 'ready';
+      if (stage === 'in_progress') return 'in_progress';
+      if (stage === 'review') return 'review';
+      if (stage === 'done') return 'done';
+      if (stage === 'dropped') return 'dropped';
       if (stage === 'blocked') return 'blocked';
-      return 'pending';
+      return 'todo';
     }
 
     async function loadProjects() {
@@ -375,7 +379,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function renderBoard() {
-      const stages = ['collected', 'triaged', 'executing', 'review', 'done', 'blocked'];
+      const stages = ['todo', 'ready', 'in_progress', 'review', 'done', 'blocked', 'dropped'];
       const root = document.getElementById('board');
       root.innerHTML = stages.map(st => {
         const tasks = state.tasks.filter(t => stageOf(t.status) === st).slice(0, 12);
@@ -479,13 +483,12 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div class=\"detail-actions\">
           <select id=\"moveStatusSel\">
-            <option value=\"pending\">pending</option>
-            <option value=\"approved\">approved</option>
+            <option value=\"todo\">todo</option>
+            <option value=\"ready\">ready</option>
             <option value=\"in_progress\">in_progress</option>
-            <option value=\"pr_ready\">pr_ready</option>
-            <option value=\"pr_open\">pr_open</option>
-            <option value=\"merged\">merged</option>
-            <option value=\"skipped\">skipped</option>
+            <option value=\"review\">review</option>
+            <option value=\"done\">done</option>
+            <option value=\"dropped\">dropped</option>
             <option value=\"blocked\">blocked</option>
           </select>
           <input id=\"moveNoteInput\" placeholder=\"note for manual transition\" />
@@ -705,17 +708,17 @@ def _verify_signature(secret: str | None, body: bytes, signature_header: str | N
 
 
 def _flow_stage_for_status(status: str) -> str:
+    normalized = _normalize_manual_status(status)
     mapping = {
-        "pending": "collected",
-        "approved": "triaged",
-        "in_progress": "executing",
-        "pr_ready": "review",
-        "pr_open": "review",
-        "merged": "done",
-        "skipped": "done",
+        "todo": "todo",
+        "ready": "ready",
+        "in_progress": "in_progress",
+        "review": "review",
+        "done": "done",
+        "dropped": "dropped",
         "blocked": "blocked",
     }
-    return mapping.get(status, "other")
+    return mapping.get(normalized, "other")
 
 
 def _extract_pr_links(runs: list[dict[str, Any]]) -> list[str]:
@@ -869,15 +872,16 @@ def _create_task_from_payload(store: Store, payload: dict[str, Any]) -> dict[str
 
 
 def _validate_manual_transition(from_status: str, to_status: str) -> str | None:
+    from_status = _normalize_manual_status(from_status)
+    to_status = _normalize_manual_status(to_status)
     allowed = {
-        "pending": {"approved", "blocked", "skipped"},
-        "approved": {"pending", "in_progress", "blocked", "skipped"},
-        "in_progress": {"approved", "pr_ready", "blocked"},
-        "pr_ready": {"approved", "pr_open", "blocked"},
-        "pr_open": {"approved", "merged", "blocked"},
-        "blocked": {"pending", "approved", "skipped"},
-        "merged": set(),
-        "skipped": set(),
+        "todo": {"ready", "blocked", "dropped"},
+        "ready": {"todo", "in_progress", "review", "blocked", "dropped"},
+        "in_progress": {"ready", "review", "blocked"},
+        "review": {"ready", "done", "blocked"},
+        "blocked": {"todo", "ready", "in_progress", "dropped"},
+        "done": set(),
+        "dropped": set(),
     }
     next_set = allowed.get(from_status)
     if next_set is None:
@@ -885,6 +889,26 @@ def _validate_manual_transition(from_status: str, to_status: str) -> str | None:
     if to_status not in next_set:
         return f"transition not allowed: {from_status} -> {to_status}"
     return None
+
+
+def _normalize_manual_status(status: str) -> str:
+    aliases = {
+        "todo": "todo",
+        "pending": "todo",
+        "ready": "ready",
+        "approved": "ready",
+        "triaged": "ready",
+        "in_progress": "in_progress",
+        "review": "review",
+        "pr_ready": "review",
+        "pr_open": "review",
+        "done": "done",
+        "merged": "done",
+        "dropped": "dropped",
+        "skipped": "dropped",
+        "blocked": "blocked",
+    }
+    return aliases.get(status, status)
 
 
 def _build_handler(
@@ -1244,6 +1268,7 @@ def _build_handler(
                     return
                 payload = self._parse_json(body)
                 to_status = str(payload.get("to_status") or "").strip()
+                to_status_norm = _normalize_manual_status(to_status)
                 note = payload.get("note")
                 force = bool(payload.get("force", False))
                 if not to_status:
@@ -1255,12 +1280,12 @@ def _build_handler(
                     return
 
                 if not force:
-                    transition_error = _validate_manual_transition(task.status, to_status)
+                    transition_error = _validate_manual_transition(task.status, to_status_norm)
                     if transition_error is not None:
                         self._send_json({"error": transition_error}, status=HTTPStatus.BAD_REQUEST)
                         return
 
-                    if to_status in {"pr_ready", "pr_open", "merged"}:
+                    if to_status_norm in {"review", "done"}:
                         runs = store.list_runs(task_id)
                         latest = runs[0] if runs else None
                         latest_passed = bool(latest and latest["status"] == "passed" and bool(latest["gate_passed"]))
@@ -1274,7 +1299,7 @@ def _build_handler(
                 final_note = str(note) if note is not None else ""
                 final_note = f"[manual-web] {final_note}".strip()
                 try:
-                    store.move_task(task_id, to_status, final_note, force=force)
+                    store.move_task(task_id, to_status_norm, final_note, force=force)
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                     return
@@ -1282,9 +1307,9 @@ def _build_handler(
                 self._send_json(
                     {
                         "ok": True,
-                        "message": f"task {task_id} moved to {to_status}",
+                        "message": f"task {task_id} moved to {to_status_norm}",
                         "task": _task_to_dict(task) if task is not None else None,
-                        "stage": _flow_stage_for_status(to_status),
+                        "stage": _flow_stage_for_status(to_status_norm),
                     }
                 )
                 if task is not None:
@@ -1294,7 +1319,7 @@ def _build_handler(
                         {
                             "task_id": task.id,
                             "status": task.status,
-                            "to_status": to_status,
+                            "to_status": to_status_norm,
                             "source": "manual_move",
                         },
                     )

@@ -10,7 +10,7 @@ from agentflow.store import Task
 class AdapterResult:
     success: bool
     note: str
-    to_status: str = "pr_ready"
+    to_status: str = "review"
 
 
 @dataclass

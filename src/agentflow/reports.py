@@ -23,7 +23,7 @@ def export_markdown(store: Store, out_dir: str, project: str | None = None) -> l
 
         out_path = Path(out_dir) / f"{project_name}-board.md"
         lines = [f"# {project_name} task board", ""]
-        for status in ["pending", "approved", "in_progress", "pr_ready", "pr_open", "merged", "blocked", "skipped"]:
+        for status in ["todo", "ready", "in_progress", "review", "done", "blocked", "dropped"]:
             lines.append(f"## {status}")
             group = status_groups.get(status, [])
             if not group:
@@ -41,7 +41,7 @@ def export_markdown(store: Store, out_dir: str, project: str | None = None) -> l
 
 
 def build_dashboard_html(store: Store) -> str:
-    statuses = ["pending", "approved", "in_progress", "pr_ready", "pr_open", "merged", "blocked", "skipped"]
+    statuses = ["todo", "ready", "in_progress", "review", "done", "blocked", "dropped"]
     rows = []
     for project in store.projects():
         counts = store.status_counts(project)

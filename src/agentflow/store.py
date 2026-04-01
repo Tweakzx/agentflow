@@ -10,29 +10,43 @@ from typing import Iterable
 from .schema import ensure_schema
 
 STATUSES = {
-    "pending",
-    "approved",
+    "todo",
+    "ready",
     "in_progress",
-    "pr_ready",
-    "pr_open",
-    "merged",
-    "skipped",
+    "review",
+    "done",
+    "dropped",
     "blocked",
 }
 
-ACTIVE_STATUSES = {"pending", "approved", "in_progress", "pr_ready", "pr_open", "blocked"}
-CLAIMABLE_STATUSES = {"pending", "approved"}
+ACTIVE_STATUSES = {"todo", "ready", "in_progress", "review", "blocked"}
+CLAIMABLE_STATUSES = {"todo", "ready"}
 ALLOWED_TRANSITIONS = {
-    "pending": {"approved", "blocked", "skipped"},
-    "approved": {"pending", "in_progress", "blocked", "skipped"},
-    "in_progress": {"approved", "pr_ready", "blocked"},
-    "pr_ready": {"approved", "pr_open", "blocked"},
-    "pr_open": {"approved", "merged", "blocked"},
-    "blocked": {"pending", "approved", "skipped"},
-    "merged": set(),
-    "skipped": set(),
+    "todo": {"ready", "blocked", "dropped"},
+    "ready": {"todo", "in_progress", "review", "blocked", "dropped"},
+    "in_progress": {"ready", "review", "blocked"},
+    "review": {"ready", "done", "blocked"},
+    "blocked": {"todo", "ready", "in_progress", "dropped"},
+    "done": set(),
+    "dropped": set(),
 }
-STATUS_ALIASES = {"done": "merged"}
+STATUS_ALIASES = {
+    # New names.
+    "todo": "todo",
+    "ready": "ready",
+    "review": "review",
+    "done": "done",
+    "dropped": "dropped",
+    # Old canonical names.
+    "pending": "todo",
+    "approved": "ready",
+    "pr_ready": "review",
+    "pr_open": "review",
+    "merged": "done",
+    "skipped": "dropped",
+    # Human-friendly aliases.
+    "triaged": "ready",
+}
 
 
 class _ManagedConnection(sqlite3.Connection):
@@ -108,6 +122,9 @@ class Store:
         source: str | None,
         external_id: str | None,
     ) -> int:
+        self._validate_score("priority", priority)
+        self._validate_score("impact", impact)
+        self._validate_score("effort", effort)
         with self.connect() as conn:
             project_id = self._project_id(conn, project)
             cur = conn.execute(
@@ -120,9 +137,13 @@ class Store:
             task_id = int(cur.lastrowid)
             conn.execute(
                 "INSERT INTO status_history(task_id, from_status, to_status, note) VALUES(?, ?, ?, ?)",
-                (task_id, None, "pending", "task created"),
+                (task_id, None, "todo", "task created"),
             )
             return task_id
+
+    def _validate_score(self, name: str, value: int) -> None:
+        if not isinstance(value, int) or value < 1 or value > 5:
+            raise ValueError(f"{name} must be an integer between 1 and 5")
 
     def create_run(
         self,
@@ -503,7 +524,7 @@ class Store:
                 FROM tasks t
                 JOIN projects p ON p.id = t.project_id
                 WHERE p.name = ?
-                  AND t.status IN ('pending', 'approved')
+                  AND t.status IN ('todo', 'ready')
                   AND (t.lease_until IS NULL OR t.lease_until < datetime('now'))
                 ORDER BY ((t.priority * 2.0 + t.impact * 3.0) / CASE WHEN t.effort <= 0 THEN 1 ELSE t.effort END) DESC,
                          t.priority DESC,
@@ -549,7 +570,7 @@ class Store:
                 JOIN projects p ON p.id = t.project_id
                 WHERE t.id = ?
                   AND p.name = ?
-                  AND t.status IN ('pending', 'approved')
+                  AND t.status IN ('todo', 'ready')
                   AND (t.lease_until IS NULL OR t.lease_until < datetime('now'))
                 LIMIT 1
                 """,
@@ -594,7 +615,7 @@ class Store:
             )
             return cur.rowcount > 0
 
-    def release_claim(self, task_id: int, agent: str, to_status: str = "approved", note: str | None = None) -> bool:
+    def release_claim(self, task_id: int, agent: str, to_status: str = "ready", note: str | None = None) -> bool:
         to_status = self._normalize_status(to_status)
 
         with self.connect() as conn:
@@ -625,21 +646,19 @@ class Store:
 
     def move_task(self, task_id: int, to_status: str, note: str | None, force: bool = False) -> None:
         to_status = self._normalize_status(to_status)
-    def move_task(self, task_id: int, to_status: str, note: str | None, force: bool = False) -> None:
-        to_status = self._normalize_status(to_status)
         with self.connect() as conn:
             row = conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
             if row is None:
                 raise ValueError(f"Task {task_id} not found")
-            from_status = str(row["status"])
+            from_status = self._normalize_status(str(row["status"]))
             if not force:
                 self._validate_transition(from_status, to_status)
             conn.execute(
                 """
                 UPDATE tasks
                 SET status = ?,
-                    assigned_agent = CASE WHEN ? IN ('merged', 'skipped', 'blocked', 'approved', 'pending', 'pr_ready', 'pr_open') THEN NULL ELSE assigned_agent END,
-                    lease_until = CASE WHEN ? IN ('merged', 'skipped', 'blocked', 'approved', 'pending', 'pr_ready', 'pr_open') THEN NULL ELSE lease_until END,
+                    assigned_agent = CASE WHEN ? IN ('done', 'dropped', 'blocked', 'ready', 'todo', 'review') THEN NULL ELSE assigned_agent END,
+                    lease_until = CASE WHEN ? IN ('done', 'dropped', 'blocked', 'ready', 'todo', 'review') THEN NULL ELSE lease_until END,
                     updated_at = datetime('now')
                 WHERE id = ?
                 """,
@@ -651,6 +670,8 @@ class Store:
             )
 
     def _validate_transition(self, from_status: str, to_status: str) -> None:
+        from_status = self._normalize_status(from_status)
+        to_status = self._normalize_status(to_status)
         next_set = ALLOWED_TRANSITIONS.get(from_status)
         if next_set is None:
             raise ValueError(f"Unknown current status: {from_status}")

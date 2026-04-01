@@ -58,7 +58,7 @@ class OpenClawAdapterTests(unittest.TestCase):
         registry = AdapterRegistry()
         self.assertIn("openclaw", registry.names())
 
-    def test_execute_success_maps_to_pr_ready(self) -> None:
+    def test_execute_success_maps_to_review(self) -> None:
         adapter = OpenClawAdapter(gateway_url="http://gateway.local")
         with patch(
             "agentflow.adapters.openclaw.urllib.request.urlopen",
@@ -66,10 +66,10 @@ class OpenClawAdapterTests(unittest.TestCase):
         ):
             result = adapter.execute(self.context, "codex-worker")
         self.assertTrue(result.success)
-        self.assertEqual("pr_ready", result.to_status)
+        self.assertEqual("review", result.to_status)
         self.assertIn("done", result.note)
 
-    def test_execute_with_pr_url_maps_to_pr_open(self) -> None:
+    def test_execute_with_pr_url_maps_to_review(self) -> None:
         adapter = OpenClawAdapter(gateway_url="http://gateway.local")
         with patch(
             "agentflow.adapters.openclaw.urllib.request.urlopen",
@@ -77,7 +77,7 @@ class OpenClawAdapterTests(unittest.TestCase):
         ):
             result = adapter.execute(self.context, "codex-worker")
         self.assertTrue(result.success)
-        self.assertEqual("pr_open", result.to_status)
+        self.assertEqual("review", result.to_status)
         self.assertIn("https://x/pr/1", result.note)
 
     def test_execute_failure_maps_to_blocked(self) -> None:

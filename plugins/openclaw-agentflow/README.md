@@ -22,7 +22,7 @@ In OpenClaw config:
         "enabled": true,
         "config": {
           "dbPath": "./data/agentflow.db",
-          "defaultProject": "kthena",
+          "defaultProject": "agentflow",
           "defaultAdapter": "openclaw",
           "defaultAgentName": "openclaw-agent"
         }
@@ -63,6 +63,7 @@ Optional environment variables for the adapter process:
 - `AGENTFLOW_OPENCLAW_TIMEOUT_SEC` (default: `1800`)
 - `AGENTFLOW_OPENCLAW_TOKEN` (optional bearer token)
 - `AGENTFLOW_ROOT` (optional AgentFlow project root; defaults to plugin-relative `../../`)
+- `AGENTFLOW_DEFAULT_PROJECT` (optional fallback project when plugin config omits `defaultProject`)
 
 Tool outputs for detail/runs/audit/board are emitted in JSON mode and returned as structured `data` when parseable.
 

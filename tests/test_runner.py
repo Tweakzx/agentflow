@@ -35,7 +35,7 @@ class RunnerTests(unittest.TestCase):
 
         self.assertIsNotNone(record.task)
         assert record.task is not None
-        self.assertEqual("pr_ready", record.task.status)
+        self.assertEqual("review", record.task.status)
 
     def test_run_once_empty_queue(self) -> None:
         runner = Runner(self.store, AdapterRegistry())

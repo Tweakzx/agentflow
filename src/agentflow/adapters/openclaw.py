@@ -65,7 +65,7 @@ class OpenClawAdapter:
         except urllib.error.URLError as exc:
             return AdapterResult(
                 success=False,
-                note=f"openclaw dispatch failed: {exc}",
+                note=f"openclaw dispatch failed: {self._format_dispatch_error(exc)}",
                 to_status="blocked",
             )
 
@@ -83,8 +83,8 @@ class OpenClawAdapter:
         success = status in {"completed", "success", "succeeded", "passed", "done", "ok"}
         if success:
             if pr_url_s:
-                return AdapterResult(success=True, note=f"{summary}; pr={pr_url_s}", to_status="pr_open")
-            return AdapterResult(success=True, note=summary, to_status="pr_ready")
+                return AdapterResult(success=True, note=f"{summary}; pr={pr_url_s}", to_status="review")
+            return AdapterResult(success=True, note=summary, to_status="review")
         return AdapterResult(success=False, note=summary, to_status="blocked")
 
     def _build_prompt(self, context: AdapterContext) -> str:
@@ -139,6 +139,21 @@ class OpenClawAdapter:
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout_sec) as resp:
                     return resp.read()
+            except urllib.error.HTTPError as exc:
+                preview = ""
+                try:
+                    preview = exc.read(200).decode("utf-8", errors="replace").strip()
+                except Exception:
+                    preview = ""
+                detail = f"HTTP {exc.code} {exc.reason}"
+                if preview:
+                    detail += f"; body={preview}"
+                last = urllib.error.URLError(detail)
+                if attempt >= self.max_retries:
+                    break
+                sleep_for = self.retry_backoff_sec * (attempt + 1)
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
             except urllib.error.URLError as exc:
                 last = exc
                 if attempt >= self.max_retries:
@@ -147,6 +162,12 @@ class OpenClawAdapter:
                 if sleep_for > 0:
                     time.sleep(sleep_for)
         raise last if last is not None else urllib.error.URLError("unknown dispatch error")
+
+    def _format_dispatch_error(self, exc: urllib.error.URLError) -> str:
+        reason = getattr(exc, "reason", None)
+        if reason:
+            return str(reason)
+        return str(exc)
 
     def _parse_response(self, raw: bytes) -> dict:
         if not raw:
