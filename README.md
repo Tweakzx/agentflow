@@ -33,8 +33,11 @@ Stage Board + Task Detail demo (illustrative, single image):
 - Run orchestration (`run-once`, `run-batch`) with adapter protocol
 - Trigger idempotency and event ingestion (`discover-issues`, `handle-comment`)
 - Periodic GitHub pull ingestion (`sync-issues`)
-- Gate enforcement with command checks and blocked-on-fail behavior
+- Gate enforcement with argv-safe command execution and blocked-on-fail behavior
+  - Gate commands may be stored as legacy strings or structured templates like `{"command":"...", "args":[...]}`; structured templates are preferred
+  - Strict allowlist mode is enabled by default via `AGENTFLOW_GATE_STRICT_ALLOWLIST=1`
   - Optional safety controls: `AGENTFLOW_GATE_ALLOWED_PREFIXES`
+  - Opt out of strict allowlisting with `AGENTFLOW_GATE_STRICT_ALLOWLIST=0`
   - Optional workspace root: `AGENTFLOW_WORKSPACE_ROOT` (for gate `cwd` resolution)
 
 ### Web Console
