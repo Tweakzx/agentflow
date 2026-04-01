@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { definePluginEntry } from "openclaw/plugin-sdk/core";
 
 const execFileAsync = promisify(execFile);
 
@@ -45,6 +45,20 @@ type LegacyToolDef = {
   description: string;
   inputSchema: Record<string, unknown>;
   run: (input: any) => Promise<any>;
+};
+
+type CompatCommandDef = {
+  id: string;
+  name: string;
+  description: string;
+  execute: (input: any) => Promise<{ ok: boolean; output: string; data?: unknown }>;
+};
+
+type CompatHttpRouteDef = {
+  method: "GET" | "POST";
+  path: string;
+  auth: "gateway" | "plugin";
+  handler: (req: any) => Promise<{ status: number; body: any }>;
 };
 
 const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
@@ -155,34 +169,34 @@ function buildCapabilitiesDoc(config: {
     },
     commandHints: [
       {
-        id: "agentflow.run",
+        id: "agentflow_run",
         when: "Execute one claimable task from queue",
-        example: "agentflow.run({ project: 'kthena', adapter: 'openclaw', agent: 'openclaw-agent' })"
+        example: "agentflow_run {\"project\":\"kthena\",\"adapter\":\"openclaw\",\"agent\":\"openclaw-agent\"}"
       },
       {
-        id: "agentflow.create",
+        id: "agentflow_create",
         when: "Create one task in AgentFlow",
-        example: "agentflow.create({ project: 'kthena', title: 'fix flaky gate' })"
+        example: "agentflow_create {\"project\":\"kthena\",\"title\":\"fix flaky gate\"}"
       },
       {
-        id: "agentflow.move",
+        id: "agentflow_move",
         when: "Move one task to a target status",
-        example: "agentflow.move({ task_id: 12, to_status: 'approved', note: 'triaged' })"
+        example: "agentflow_move {\"task_id\":12,\"to_status\":\"approved\",\"note\":\"triaged\"}"
       },
       {
-        id: "agentflow.detail",
+        id: "agentflow_detail",
         when: "Inspect one task with runs + history",
-        example: "agentflow.detail({ task_id: 12 })"
+        example: "agentflow_detail {\"task_id\":12}"
       },
       {
-        id: "agentflow.audit",
+        id: "agentflow_audit",
         when: "Read recent status transition events",
-        example: "agentflow.audit({ project: 'kthena', limit: 20 })"
+        example: "agentflow_audit {\"project\":\"kthena\",\"limit\":20}"
       },
       {
-        id: "agentflow.help",
+        id: "agentflow_help",
         when: "Read plugin usage guidance and capability map",
-        example: "agentflow.help({ mode: 'quickstart' })"
+        example: "agentflow_help {\"mode\":\"quickstart\"}"
       }
     ],
     tools: [
@@ -264,7 +278,7 @@ function buildCapabilitiesDoc(config: {
     workflow: [
       "discover: webhook/issues payload -> AgentFlow task ingestion",
       "triage: inspect board/status with agentflow_status",
-      "execute: run one task with agentflow.run",
+      "execute: run one task with command agentflow_run",
       "observe: inspect run/audit from AgentFlow web console"
     ]
   };
@@ -276,7 +290,7 @@ function formatHelpText(doc: CapabilityDoc, mode: string): string {
       "AgentFlow OpenClaw Plugin Quickstart",
       `defaults: project=${doc.defaults.project}, adapter=${doc.defaults.adapter}, agent=${doc.defaults.agent}`,
       "1) use tool agentflow_capabilities(mode=full) when agent is unsure",
-      "2) run queue task with command agentflow.run",
+      "2) run queue task with command agentflow_run",
       "3) inspect board text with tool agentflow_status(project=...)",
       "4) send comment webhook to /agentflow/webhook/comment for event-driven run"
     ].join("\n");
@@ -324,10 +338,139 @@ function registerToolCompat(api: any, spec: LegacyToolDef): void {
   }
 }
 
+function parseCommandInput(raw: any): Record<string, unknown> {
+  if (raw && typeof raw === "object" && !("args" in raw)) return raw as Record<string, unknown>;
+  const args = typeof raw?.args === "string" ? raw.args.trim() : "";
+  if (!args) return {};
+  try {
+    const parsed = JSON.parse(args);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Fallback to key=value pairs.
+  }
+  const out: Record<string, unknown> = {};
+  for (const token of args.split(/\s+/)) {
+    const idx = token.indexOf("=");
+    if (idx <= 0) continue;
+    const key = token.slice(0, idx).trim();
+    const value = token.slice(idx + 1).trim();
+    if (!key) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function registerCommandCompat(api: any, spec: CompatCommandDef): void {
+  const modern = {
+    name: spec.name,
+    description: spec.description,
+    acceptsArgs: true,
+    requireAuth: false,
+    async handler(ctx: any) {
+      const input = parseCommandInput(ctx);
+      const result = await spec.execute(input);
+      return { text: result.output };
+    },
+  };
+  const legacy = {
+    id: spec.id,
+    description: spec.description,
+    async handler(input: any) {
+      return spec.execute(input ?? {});
+    },
+  };
+  try {
+    api.registerCommand?.(modern);
+  } catch {
+    api.registerCommand?.(legacy);
+  }
+}
+
+function parseQueryObject(rawUrl: string | undefined): Record<string, string> {
+  if (!rawUrl) return {};
+  try {
+    const parsed = new URL(rawUrl, "http://127.0.0.1");
+    const out: Record<string, string> = {};
+    for (const [k, v] of parsed.searchParams.entries()) out[k] = v;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+async function readJsonBody(req: any): Promise<any> {
+  if (req && typeof req === "object" && "body" in req) return req.body ?? {};
+  const chunks: Buffer[] = [];
+  await new Promise<void>((resolve, reject) => {
+    req.on("data", (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))));
+    req.on("end", () => resolve());
+    req.on("error", (err: unknown) => reject(err));
+  });
+  const text = Buffer.concat(chunks).toString("utf-8");
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+function writeJson(res: any, status: number, body: any): void {
+  res.statusCode = status;
+  res.setHeader?.("content-type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(body));
+}
+
+function registerHttpRouteCompat(api: any, spec: CompatHttpRouteDef): void {
+  const modern = {
+    path: spec.path,
+    auth: spec.auth,
+    match: "exact" as const,
+    async handler(req: any, res: any) {
+      const method = String(req?.method || "").toUpperCase();
+      if (method !== spec.method) {
+        writeJson(res, 405, { ok: false, error: `Method ${method || "UNKNOWN"} not allowed` });
+        return true;
+      }
+      const normalizedReq = {
+        headers: req?.headers ?? {},
+        query: parseQueryObject(req?.url),
+        body: await readJsonBody(req),
+      };
+      const out = await spec.handler(normalizedReq);
+      writeJson(res, Number(out?.status || 200), out?.body ?? { ok: true });
+      return true;
+    },
+  };
+  const legacy = {
+    method: spec.method,
+    path: spec.path,
+    async handler(req: any) {
+      return spec.handler(req);
+    },
+  };
+  try {
+    api.registerHttpRoute?.(modern);
+  } catch {
+    api.registerHttpRoute?.(legacy);
+  }
+}
+
 export default definePluginEntry({
   id: "agentflow",
   name: "AgentFlow",
   register(api: any) {
+    const step = (label: string, fn: () => void) => {
+      try {
+        fn();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`agentflow register failed at ${label}: ${msg}`);
+      }
+    };
+
     const cfg: PluginConfig = (api?.config ?? {}) as PluginConfig;
     const dbPath = cfg.dbPath || "./data/agentflow.db";
     const defaultProject = cfg.defaultProject || "default";
@@ -340,10 +483,11 @@ export default definePluginEntry({
       agent: defaultAgentName
     });
 
-    api.registerCommand?.({
+    step("command agentflow_run", () => registerCommandCompat(api, {
       id: "agentflow.run",
+      name: "agentflow_run",
       description: "Run one AgentFlow task through adapter",
-      async handler(input: { project?: string; adapter?: string; agent?: string }) {
+      async execute(input: { project?: string; adapter?: string; agent?: string }) {
         const project = input?.project || defaultProject;
         const adapter = input?.adapter || defaultAdapter;
         const agent = input?.agent || defaultAgentName;
@@ -360,12 +504,13 @@ export default definePluginEntry({
         ]);
         return { ok: true, output: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    api.registerCommand?.({
+    step("command agentflow_create", () => registerCommandCompat(api, {
       id: "agentflow.create",
+      name: "agentflow_create",
       description: "Create one AgentFlow task",
-      async handler(input: {
+      async execute(input: {
         project?: string;
         title?: string;
         description?: string;
@@ -389,12 +534,13 @@ export default definePluginEntry({
         const result = await runAgentflow(args);
         return { ok: true, output: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    api.registerCommand?.({
+    step("command agentflow_move", () => registerCommandCompat(api, {
       id: "agentflow.move",
+      name: "agentflow_move",
       description: "Move one AgentFlow task to a target status",
-      async handler(input: { task_id?: number; to_status?: string; note?: string }) {
+      async execute(input: { task_id?: number; to_status?: string; note?: string }) {
         if (!Number.isFinite(Number(input?.task_id)) || !input?.to_status) {
           return { ok: false, output: "task_id and to_status are required" };
         }
@@ -403,12 +549,13 @@ export default definePluginEntry({
         const result = await runAgentflow(args);
         return { ok: true, output: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    api.registerCommand?.({
+    step("command agentflow_detail", () => registerCommandCompat(api, {
       id: "agentflow.detail",
+      name: "agentflow_detail",
       description: "Get task detail with runs and history",
-      async handler(input: { task_id?: number }) {
+      async execute(input: { task_id?: number }) {
         if (!Number.isFinite(Number(input?.task_id))) {
           return { ok: false, output: "task_id is required" };
         }
@@ -423,12 +570,13 @@ export default definePluginEntry({
         const data = parseStructuredOutput(result.stdout);
         return data !== null ? { ok: true, output: JSON.stringify(data), data } : { ok: true, output: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    api.registerCommand?.({
+    step("command agentflow_audit", () => registerCommandCompat(api, {
       id: "agentflow.audit",
+      name: "agentflow_audit",
       description: "List recent status transition audit events",
-      async handler(input: { project?: string; limit?: number }) {
+      async execute(input: { project?: string; limit?: number }) {
         const project = input?.project || defaultProject;
         const limit = Number.isFinite(Number(input?.limit)) ? Number(input?.limit) : 30;
         const result = await runAgentflow([
@@ -444,24 +592,25 @@ export default definePluginEntry({
         const data = parseStructuredOutput(result.stdout);
         return data !== null ? { ok: true, output: JSON.stringify(data), data } : { ok: true, output: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    api.registerCommand?.({
+    step("command agentflow_help", () => registerCommandCompat(api, {
       id: "agentflow.help",
+      name: "agentflow_help",
       description: "Show AgentFlow capability guidance for agents",
-      async handler(input: { mode?: string }) {
+      async execute(input: { mode?: string }) {
         const mode = input?.mode || "quickstart";
         return { ok: true, output: formatHelpText(capabilitiesDoc, mode) };
       }
-    });
+    }));
 
-    registerToolCompat(api, {
+    step("tool agentflow_status", () => registerToolCompat(api, {
       id: "agentflow_status",
       description: "Read AgentFlow queue status",
       inputSchema: {
         type: "object",
         properties: {
-          project: { type: "string" }
+          project: { type: "string", description: "Project name to inspect; defaults to plugin defaultProject." }
         }
       },
       async run(input: { project?: string }) {
@@ -470,15 +619,15 @@ export default definePluginEntry({
         const data = parseStructuredOutput(result.stdout);
         return data !== null ? { content: JSON.stringify(data), data } : { content: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    registerToolCompat(api, {
+    step("tool agentflow_capabilities", () => registerToolCompat(api, {
       id: "agentflow_capabilities",
       description: "Describe AgentFlow plugin capabilities, routes, and usage",
       inputSchema: {
         type: "object",
         properties: {
-          mode: { type: "string", enum: ["quickstart", "full"] }
+          mode: { type: "string", enum: ["quickstart", "full"], description: "Output mode for capability description." }
         }
       },
       async run(input: { mode?: string }) {
@@ -488,23 +637,23 @@ export default definePluginEntry({
         }
         return { content: JSON.stringify(capabilitiesDoc, null, 2) };
       }
-    });
+    }));
 
-    registerToolCompat(api, {
+    step("tool agentflow_create_task", () => registerToolCompat(api, {
       id: "agentflow_create_task",
       description: "Create a task in AgentFlow",
       inputSchema: {
         type: "object",
         required: ["project", "title"],
         properties: {
-          project: { type: "string" },
-          title: { type: "string" },
-          description: { type: "string" },
-          priority: { type: "number" },
-          impact: { type: "number" },
-          effort: { type: "number" },
-          source: { type: "string" },
-          external_id: { type: "string" }
+          project: { type: "string", description: "Project name that owns the task." },
+          title: { type: "string", description: "Task title." },
+          description: { type: "string", description: "Optional task details." },
+          priority: { type: "number", description: "Priority score (higher = more urgent)." },
+          impact: { type: "number", description: "Impact score (higher = more value)." },
+          effort: { type: "number", description: "Effort estimate (higher = harder)." },
+          source: { type: "string", description: "Source system (e.g. github)." },
+          external_id: { type: "string", description: "External issue id/reference." }
         }
       },
       async run(input: {
@@ -527,18 +676,18 @@ export default definePluginEntry({
         const result = await runAgentflow(args);
         return { content: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    registerToolCompat(api, {
+    step("tool agentflow_move_task", () => registerToolCompat(api, {
       id: "agentflow_move_task",
       description: "Move task to another status",
       inputSchema: {
         type: "object",
         required: ["task_id", "to_status"],
         properties: {
-          task_id: { type: "number" },
-          to_status: { type: "string" },
-          note: { type: "string" }
+          task_id: { type: "number", description: "Task numeric id." },
+          to_status: { type: "string", description: "Target workflow status." },
+          note: { type: "string", description: "Optional transition note." }
         }
       },
       async run(input: { task_id: number; to_status: string; note?: string }) {
@@ -547,31 +696,31 @@ export default definePluginEntry({
         const result = await runAgentflow(args);
         return { content: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    registerToolCompat(api, {
+    step("tool agentflow_task_detail", () => registerToolCompat(api, {
       id: "agentflow_task_detail",
       description: "Read one task detail",
       inputSchema: {
         type: "object",
         required: ["task_id"],
-        properties: { task_id: { type: "number" } }
+        properties: { task_id: { type: "number", description: "Task numeric id." } }
       },
       async run(input: { task_id: number }) {
         const result = await runAgentflow(["--db", dbPath, "task-detail", "--task-id", String(input.task_id), "--json"]);
         const data = parseStructuredOutput(result.stdout);
         return data !== null ? { content: JSON.stringify(data), data } : { content: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    registerToolCompat(api, {
+    step("tool agentflow_recent_runs", () => registerToolCompat(api, {
       id: "agentflow_recent_runs",
       description: "Read recent runs for a project",
       inputSchema: {
         type: "object",
         properties: {
-          project: { type: "string" },
-          limit: { type: "number" }
+          project: { type: "string", description: "Project name; defaults to plugin defaultProject." },
+          limit: { type: "number", description: "Maximum number of run rows to return." }
         }
       },
       async run(input: { project?: string; limit?: number }) {
@@ -590,16 +739,16 @@ export default definePluginEntry({
         const data = parseStructuredOutput(result.stdout);
         return data !== null ? { content: JSON.stringify(data), data } : { content: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    registerToolCompat(api, {
+    step("tool agentflow_audit", () => registerToolCompat(api, {
       id: "agentflow_audit",
       description: "Read recent status transition events",
       inputSchema: {
         type: "object",
         properties: {
-          project: { type: "string" },
-          limit: { type: "number" }
+          project: { type: "string", description: "Project name; defaults to plugin defaultProject." },
+          limit: { type: "number", description: "Maximum number of audit rows to return." }
         }
       },
       async run(input: { project?: string; limit?: number }) {
@@ -618,11 +767,12 @@ export default definePluginEntry({
         const data = parseStructuredOutput(result.stdout);
         return data !== null ? { content: JSON.stringify(data), data } : { content: result.stdout || result.stderr };
       }
-    });
+    }));
 
-    api.registerHttpRoute?.({
+    step("route GET /agentflow/capabilities", () => registerHttpRouteCompat(api, {
       method: "GET",
       path: "/agentflow/capabilities",
+      auth: "plugin",
       async handler(req: any) {
         const mode = req?.query?.mode === "quickstart" ? "quickstart" : "full";
         if (mode === "quickstart") {
@@ -630,11 +780,12 @@ export default definePluginEntry({
         }
         return { status: 200, body: { ok: true, capabilities: capabilitiesDoc } };
       }
-    });
+    }));
 
-    api.registerHttpRoute?.({
+    step("route POST /agentflow/webhook/comment", () => registerHttpRouteCompat(api, {
       method: "POST",
       path: "/agentflow/webhook/comment",
+      auth: "plugin",
       async handler(req: any) {
         const payload = req?.body ?? {};
         const project = payload?.project || defaultProject;
@@ -656,11 +807,12 @@ export default definePluginEntry({
         ]);
         return { status: 200, body: { ok: true, output: result.stdout || result.stderr } };
       }
-    });
+    }));
 
-    api.registerHttpRoute?.({
+    step("route POST /agentflow/webhook/issues", () => registerHttpRouteCompat(api, {
       method: "POST",
       path: "/agentflow/webhook/issues",
+      auth: "plugin",
       async handler(req: any) {
         const payload = req?.body ?? {};
         const project = payload?.project || defaultProject;
@@ -682,11 +834,12 @@ export default definePluginEntry({
         ]);
         return { status: 200, body: { ok: true, output: result.stdout || result.stderr } };
       }
-    });
+    }));
 
-    api.registerHttpRoute?.({
+    step("route POST /agentflow/webhook/github", () => registerHttpRouteCompat(api, {
       method: "POST",
       path: "/agentflow/webhook/github",
+      auth: "plugin",
       async handler(req: any) {
         const payload = req?.body ?? {};
         const project = payload?.project || defaultProject;
@@ -726,6 +879,6 @@ export default definePluginEntry({
         ]);
         return { status: 200, body: { ok: true, event: event || "unknown", output: result.stdout || result.stderr } };
       }
-    });
+    }));
   }
 });
