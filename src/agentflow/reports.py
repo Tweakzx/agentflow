@@ -10,7 +10,11 @@ def export_markdown(store: Store, out_dir: str, project: str | None = None) -> l
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     created: list[str] = []
 
-    projects = [project] if project else list(store.projects())
+    known_projects = list(store.projects())
+    if project:
+        projects = [project] if project in known_projects else []
+    else:
+        projects = known_projects
     for project_name in projects:
         tasks = store.list_tasks(project_name)
         status_groups: dict[str, list] = defaultdict(list)

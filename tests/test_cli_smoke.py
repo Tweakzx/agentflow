@@ -170,6 +170,12 @@ class CliSmokeTests(unittest.TestCase):
         self.assertTrue((out_dir / "demo-board.md").exists())
         self.assertFalse((out_dir / "other-board.md").exists())
 
+    def test_export_md_project_rejects_unknown_project(self) -> None:
+        out_dir = Path(self.tempdir.name) / "exports-missing"
+        output = self._run_cli("export-md", "--out", str(out_dir), "--project", "missing")
+        self.assertEqual(output.strip(), "no projects found")
+        self.assertFalse((out_dir / "missing-board.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
