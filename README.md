@@ -61,6 +61,21 @@ Stage Board + Task Detail demo (illustrative, single image):
 - Optional signature verification: `X-Hub-Signature-256`
 - Comment webhooks are queued asynchronously (fast ACK + background run)
 
+### Ops & Safety Endpoints
+
+- `GET /healthz` liveness probe
+- `GET /readyz` readiness probe (includes DB check)
+
+### Gate Strict Mode (Default On)
+
+- Gate commands now run with `shell=False`
+- Gate command supports:
+  - legacy string form: `"python3 -m pytest -q"`
+  - structured form: `{"command":"python3","args":["-m","pytest","-q"]}`
+- Strict allowlist is enabled by default:
+  - `AGENTFLOW_GATE_ALLOWED_PREFIXES=python3,pytest,go`
+  - `AGENTFLOW_GATE_STRICT_MODE=0` to temporarily disable strict mode
+
 ### OpenClaw Native Plugin
 
 Path: `plugins/openclaw-agentflow/`

@@ -78,8 +78,9 @@ class Runner:
                     timeout_sec=timeout_sec,
                     cwd=self._resolve_workspace(context.repo_full_name),
                     allowed_prefixes=self._allowed_gate_prefixes(),
+                    strict_mode=self._gate_strict_mode(),
                 )
-                gate_result = evaluator.evaluate([str(c) for c in commands])
+                gate_result = evaluator.evaluate(list(commands))
                 gate_passed = gate_result.passed
                 gate_summary = "; ".join(
                     [f"{c.command} => {'ok' if c.passed else 'fail'}" for c in gate_result.checks]
@@ -142,3 +143,7 @@ class Runner:
             return None
         vals = [x.strip() for x in raw.split(",") if x.strip()]
         return vals or None
+
+    def _gate_strict_mode(self) -> bool:
+        raw = os.environ.get("AGENTFLOW_GATE_STRICT_MODE", "1").strip().lower()
+        return raw not in {"0", "false", "no", "off"}
