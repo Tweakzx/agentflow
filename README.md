@@ -12,7 +12,8 @@ AgentFlow is not a full agent platform. It is a control layer that sits above ex
 - stage-first workflow management
 - execution/run traceability
 - gate-aware status transitions
-- audit-friendly lifecycle history
+- evidence-first lifecycle history
+- unified ledger event contract for API/SSE/CLI/console views
 
 ## Visual Overview
 
@@ -28,7 +29,7 @@ Stage Board + Task Detail demo (illustrative, single image):
 
 ### Core Engine (CLI + DB)
 
-- SQLite-first storage: `projects`, `tasks`, `status_history`, `runs`, `run_steps`, `triggers`, `gate_profiles`
+- SQLite-first storage: `projects`, `tasks`, `runs`, `triggers`, `gate_profiles`, `ledger_events`
 - Task lifecycle and scoring (`next`, `claim-next`, `heartbeat`, `release`, `move`)
 - Run orchestration (`run-once`, `run-batch`) with adapter protocol
 - Trigger idempotency and event ingestion (`discover-issues`, `handle-comment`)
@@ -39,9 +40,9 @@ Stage Board + Task Detail demo (illustrative, single image):
 
 ### Web Console
 
-- Stage Board as top-level view (drag-and-drop stage movement)
+- Task list + status groups as top-level view
 - Task center with `stage/source` filters
-- Task detail with PR-focused panel and related links
+- Task detail with unified event timeline (`timeline`) and derived evidence signals (`derived_summary`)
 - Manual transition with safeguards + optional `force`
 - Recent runs + audit trail panels
 - APIs:
@@ -49,9 +50,16 @@ Stage Board + Task Detail demo (illustrative, single image):
   - `GET /api/flow?project=<project>`
   - `GET /api/events?project=<project>&last_event_id=<id>` (SSE stream)
   - `GET /api/audit?project=<project>&limit=30`
+  - `GET /api/task/<id>` (`task`, `recent_runs`, `timeline`, `derived_summary`)
   - `POST /api/task/<id>/run`
   - `POST /api/task/<id>/progress`
   - `POST /api/task/<id>/move`
+
+### CLI Inspection (Ledger-backed)
+
+- `agentflow audit --project <project>` now reads unified project ledger audit events
+- `agentflow run-steps <run_id>` now shows run timeline ledger events (command name kept for compatibility)
+- `agentflow recent-runs --project <project>` keeps run snapshots and includes latest ledger event summary per run
 
 ### Webhook Endpoints (Console)
 
@@ -96,7 +104,7 @@ Open `http://127.0.0.1:8787`.
 - Plugin-first: can enhance existing agent stacks instead of replacing them
 - Stage-first UX: easier human control for multi-issue execution
 - Strong governance: transition validation + gate-aware promotion
-- Traceability: runs/triggers/status history/audit are first-class records
+- Traceability: `ledger_events` is the source of truth; `tasks/runs` remain snapshot state
 - Multi-repo ready: one control plane for several repositories
 
 ## Project Comparison (High-Level)

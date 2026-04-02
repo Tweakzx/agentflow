@@ -40,6 +40,75 @@ class CliSmokeTests(unittest.TestCase):
         )
         self.store.append_run_step(self.run_id, "claim", "passed", "ok")
         self.store.finalize_run(self.run_id, "passed", gate_passed=True, result_summary="ok")
+        self.store.append_ledger_event(
+            project="demo",
+            task_id=self.task_id,
+            run_id=None,
+            trigger_id=None,
+            parent_event_id=None,
+            event_family="dispatch",
+            event_type="task.status_changed",
+            actor_type="system",
+            actor_id="cli-smoke",
+            source_type="manual",
+            source_ref="tests",
+            status_from=None,
+            status_to="todo",
+            run_status_from=None,
+            run_status_to=None,
+            severity="info",
+            summary="Task created",
+            evidence={"reason": "seed"},
+            next_action={},
+            context={},
+            idempotency_key="k-cli-e-1",
+        )
+        self.store.append_ledger_event(
+            project="demo",
+            task_id=self.task_id,
+            run_id=self.run_id,
+            trigger_id=None,
+            parent_event_id=None,
+            event_family="execution",
+            event_type="run.step",
+            actor_type="agent",
+            actor_id="codex-a",
+            source_type="comment",
+            source_ref="pr#1:comment#1",
+            status_from=None,
+            status_to=None,
+            run_status_from="running",
+            run_status_to="running",
+            severity="info",
+            summary="Step claim passed",
+            evidence={"step_name": "claim", "status": "passed"},
+            next_action={},
+            context={},
+            idempotency_key="k-cli-e-2",
+        )
+        self.store.append_ledger_event(
+            project="demo",
+            task_id=self.task_id,
+            run_id=self.run_id,
+            trigger_id=None,
+            parent_event_id=None,
+            event_family="execution",
+            event_type="run.finished",
+            actor_type="agent",
+            actor_id="codex-a",
+            source_type="comment",
+            source_ref="pr#1:comment#1",
+            status_from=None,
+            status_to=None,
+            run_status_from="running",
+            run_status_to="passed",
+            severity="info",
+            summary="Run finished",
+            evidence={"gate_passed": True},
+            next_action={},
+            context={},
+            idempotency_key="k-cli-e-3",
+        )
         self.store.upsert_trigger(
             project="demo",
             trigger_type="comment",
@@ -101,7 +170,8 @@ class CliSmokeTests(unittest.TestCase):
         runs_out = self._run_cli("runs", "--task-id", str(self.task_id))
         steps_out = self._run_cli("run-steps", str(self.run_id))
         self.assertIn("status=passed", runs_out)
-        self.assertIn("step=claim", steps_out)
+        self.assertIn("event_type=run.step", steps_out)
+        self.assertIn("summary=Step claim passed", steps_out)
 
     def test_task_detail_audit_and_recent_runs_commands(self) -> None:
         detail_out = self._run_cli("task-detail", "--task-id", str(self.task_id))
@@ -109,8 +179,10 @@ class CliSmokeTests(unittest.TestCase):
         recent_out = self._run_cli("recent-runs", "--project", "demo", "--limit", "5")
         self.assertIn('"task"', detail_out)
         self.assertIn('"history"', detail_out)
-        self.assertIn("to=todo", audit_out)
+        self.assertIn("event_type=task.status_changed", audit_out)
+        self.assertIn("summary=Task created", audit_out)
         self.assertIn("task=", recent_out)
+        self.assertIn("last_event=run.finished", recent_out)
 
     def test_json_output_modes(self) -> None:
         board_out = self._run_cli("board", "--project", "demo", "--json")

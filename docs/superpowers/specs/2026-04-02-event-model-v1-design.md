@@ -1,7 +1,7 @@
 # AgentFlow Event Model v1 设计
 
 日期：2026-04-02
-状态：Draft v1
+状态：Implemented v1 (baseline)
 
 ## 1. 目标
 
@@ -31,6 +31,28 @@
 - 这会把问题继续留在存储层，前后端仍然会面对多套不一致语义
 - 接下来控制台要做 evidence-first 展示，必须先有统一事实模型
 - 当前历史包袱较小，适合直接建立正确模型，而不是先做兼容层
+
+## 2.1 实现基线（2026-04-02）
+
+截至 2026-04-02，以下能力已落地：
+
+1. 存储与服务层
+- 新增 `ledger_events`，并提供项目/任务/run 维度查询与审计查询
+- `tasks/runs` 保留为当前态快照
+
+2. 写路径
+- runner、webhook、手工流转关键路径写入统一 ledger 事件
+- webhook provenance（`trigger_id/source_ref`）已贯穿到 run/事件链路
+
+3. 读路径
+- `GET /api/events` 返回统一事件对象（SSE `event:`= `event_type`）
+- `GET /api/audit` 读取统一审计事件
+- `GET /api/task/<id>` 返回 `task`、`recent_runs`、`timeline`、`derived_summary`
+
+4. CLI
+- `audit` 读取 unified ledger audit events
+- `run-steps` 兼容保留命令名，输出 run timeline ledger events
+- `recent-runs` 输出 run 快照并附带最近事件摘要
 
 ## 3. 核心原则
 

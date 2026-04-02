@@ -295,6 +295,14 @@ class ConsoleFlowTests(unittest.TestCase):
         self.assertIn("e.occurred_at || e.recorded_at", CONSOLE_JS)
         self.assertIn("e.summary", CONSOLE_JS)
 
+    def test_console_task_detail_renders_timeline_and_derived_summary(self) -> None:
+        self.assertIn("const timelineRows = (data.timeline || []).slice(0, 20);", CONSOLE_JS)
+        self.assertIn("const derived = data.derived_summary || {};", CONSOLE_JS)
+        self.assertIn("Latest Progress", CONSOLE_JS)
+        self.assertIn("Latest Handoff", CONSOLE_JS)
+        self.assertIn("Latest Risk", CONSOLE_JS)
+        self.assertIn("Recommended Actions", CONSOLE_JS)
+
     def test_console_does_not_include_custom_favicon(self) -> None:
         self.assertIn('rel="icon"', INDEX_HTML)
         self.assertIn("data:image/svg+xml", INDEX_HTML)

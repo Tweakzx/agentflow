@@ -102,12 +102,12 @@ def _parser() -> argparse.ArgumentParser:
     p_recent_runs.add_argument("--limit", type=int, default=20)
     p_recent_runs.add_argument("--json", action="store_true")
 
-    p_audit = sub.add_parser("audit", help="List recent status transition events for a project")
+    p_audit = sub.add_parser("audit", help="List recent ledger audit events for a project")
     p_audit.add_argument("--project", required=True)
     p_audit.add_argument("--limit", type=int, default=50)
     p_audit.add_argument("--json", action="store_true")
 
-    p_run_steps = sub.add_parser("run-steps", help="List run steps")
+    p_run_steps = sub.add_parser("run-steps", help="List run timeline events (ledger-backed)")
     p_run_steps.add_argument("run_id", type=int)
     p_run_steps.add_argument("--json", action="store_true")
 
@@ -350,39 +350,48 @@ def main() -> None:
             print("(no runs)")
             return
         for row in rows:
+            timeline = store.list_run_timeline(int(row["id"]), limit=1)
+            last_event = timeline[0] if timeline else None
+            last_event_type = str(last_event["event_type"]) if last_event else "-"
+            last_summary = str(last_event["summary"]) if last_event else "-"
             print(
                 f"{row['id']} task={row['task_id']} status={row['status']} "
-                f"gate_passed={row['gate_passed']} adapter={row['adapter']} agent={row['agent_name']}"
+                f"gate_passed={row['gate_passed']} adapter={row['adapter']} agent={row['agent_name']} "
+                f"last_event={last_event_type} summary={last_summary}"
             )
         return
 
     if args.command == "audit":
-        rows = store.list_recent_status_history(args.project, limit=max(1, min(200, int(args.limit))))
+        rows = store.list_project_audit_events(args.project, limit=max(1, min(200, int(args.limit))))
         if getattr(args, "json", False):
-            print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
             return
         if not rows:
             print("(no events)")
             return
         for row in rows:
+            status_from = str(row["status_from"]) if row["status_from"] else "-"
+            status_to = str(row["status_to"]) if row["status_to"] else "-"
+            summary = str(row["summary"]) if row["summary"] else "-"
             print(
-                f"{row['id']} task={row['task_id']} from={row['from_status'] or '-'} "
-                f"to={row['to_status']} note={row['note'] or '-'}"
+                f"{row['id']} task={row['task_id']} event_type={row['event_type']} "
+                f"severity={row['severity']} from={status_from} to={status_to} summary={summary}"
             )
         return
 
     if args.command == "run-steps":
-        rows = store.list_run_steps(args.run_id)
+        rows = store.list_run_timeline(args.run_id, limit=200)
         if getattr(args, "json", False):
-            print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
             return
         if not rows:
-            print("(no run steps)")
+            print("(no run timeline events)")
             return
         for row in rows:
+            summary = str(row["summary"]) if row["summary"] else "-"
             print(
-                f"{row['id']} run={row['run_id']} step={row['step_name']} status={row['status']} "
-                f"log={row['log_excerpt'] or '-'}"
+                f"{row['id']} run={row['run_id']} event_type={row['event_type']} "
+                f"severity={row['severity']} summary={summary}"
             )
         return
 

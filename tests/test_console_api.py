@@ -234,6 +234,10 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(data["timeline"]), 1)
         self.assertGreaterEqual(len(data["recent_runs"]), 1)
         self.assertIsInstance(data["derived_summary"], dict)
+        self.assertIn("latest_progress", data["derived_summary"])
+        self.assertIn("latest_handoff", data["derived_summary"])
+        self.assertIn("latest_risk", data["derived_summary"])
+        self.assertIn("recommended_actions", data["derived_summary"])
 
     def test_progress_helper_and_force_move_use_store_ledger_hooks(self) -> None:
         claimed = self.store.claim_task(self.task_id, "demo", "bot-a", lease_minutes=20)

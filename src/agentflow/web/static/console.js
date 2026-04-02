@@ -168,6 +168,39 @@
       `).join('');
     }
 
+    function timelineEventLine(e) {
+      const when = e.occurred_at || e.recorded_at || '-';
+      const statusFrom = e.status_from || '-';
+      const statusTo = e.status_to || '-';
+      return `
+        <div class="timeline-item">
+          <div><strong>${e.event_type || 'event'}</strong> · <span class="${statusClass(statusTo)}">${statusTo}</span></div>
+          <div class="sub">${e.summary || '-'} | ${statusFrom} -> ${statusTo} | ${when}</div>
+        </div>
+      `;
+    }
+
+    function derivedEventCard(label, eventValue) {
+      if (!eventValue) {
+        return `
+          <div class="stat">
+            <div class="k">${label}</div>
+            <div class="v">-</div>
+            <div class="sub">No signal yet</div>
+          </div>
+        `;
+      }
+      const when = eventValue.occurred_at || eventValue.recorded_at || '-';
+      return `
+        <div class="stat">
+          <div class="k">${label}</div>
+          <div class="v">${eventValue.event_type || '-'}</div>
+          <div class="sub">${eventValue.summary || '-'}</div>
+          <div class="sub">${when}</div>
+        </div>
+      `;
+    }
+
     async function openTask(taskId) {
       const data = await api(`/api/task/${taskId}`);
       state.selectedTask = data.task;
@@ -179,12 +212,14 @@
       const t = data.task;
       const links = data.links || {};
       const pr = data.pr_summary || {};
+      const derived = data.derived_summary || {};
       const issueUrl = links.issue_url || '';
       const prUrl = links.pr_url || '';
       const repo = links.repo || '';
       const prCandidates = links.pr_candidates || [];
-      const latestRuns = (data.runs || []).slice(0, 5);
-      const historyRows = (data.history || []).slice(0, 12);
+      const latestRuns = (data.recent_runs || data.runs || []).slice(0, 5);
+      const timelineRows = (data.timeline || []).slice(0, 20);
+      const recommendedActions = Array.isArray(derived.recommended_actions) ? derived.recommended_actions : [];
       const detail = document.getElementById('detail');
       detail.innerHTML = `
         <div class="detail-top">
@@ -198,6 +233,18 @@
           <div class="stat"><div class="k">Priority / Impact / Effort</div><div class="v">${t.priority} / ${t.impact} / ${t.effort}</div></div>
           <div class="stat"><div class="k">Runs</div><div class="v">${pr.run_count || 0}</div></div>
           <div class="stat"><div class="k">Latest Gate</div><div class="v">${pr.latest_gate_passed === null || pr.latest_gate_passed === undefined ? '-' : (pr.latest_gate_passed ? 'pass' : 'fail')}</div></div>
+        </div>
+        <div class="history">
+          <h4 style="margin:0 0 8px">Derived Signals</h4>
+          <div class="detail-grid">
+            ${derivedEventCard('Latest Progress', derived.latest_progress)}
+            ${derivedEventCard('Latest Handoff', derived.latest_handoff)}
+            ${derivedEventCard('Latest Risk', derived.latest_risk)}
+          </div>
+          <div class="timeline-item">
+            <strong>Recommended Actions</strong>
+            <div class="sub">${recommendedActions.length ? recommendedActions.map(a => a.label || a.id || '-').join(', ') : 'No recommended actions'}</div>
+          </div>
         </div>
         <div class="history">
           <h4 style="margin:0 0 8px">PR Detail</h4>
@@ -228,8 +275,8 @@
           <button class="secondary" onclick="moveTask(${t.id}, null, null, null)">Update Flow</button>
         </div>
         <div class="history">
-          <h4 style="margin:0 0 8px">Flow History</h4>
-          ${historyRows.map(h => `<div class="timeline-item">${h.changed_at}: ${h.from_status || '-'} -> ${h.to_status} ${h.note ? `| ${h.note}` : ''}</div>`).join('') || '<div class="sub">No history</div>'}
+          <h4 style="margin:0 0 8px">Task Timeline (Latest 20)</h4>
+          ${timelineRows.map(timelineEventLine).join('') || '<div class="sub">No timeline events</div>'}
         </div>
         <div class="history">
           <h4 style="margin:0 0 8px">Recent Runs (Top 5)</h4>
