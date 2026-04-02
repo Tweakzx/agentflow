@@ -185,167 +185,303 @@
     function renderDetail(data) {
       const t = data.task;
       const links = data.links || {};
-      const pr = data.pr_summary || {};
       const derived = data.derived_summary || {};
       const issueUrl = links.issue_url || '';
       const prUrl = links.pr_url || '';
       const repo = links.repo || '';
       const prCandidates = links.pr_candidates || [];
-      const latestRuns = (data.recent_runs || data.runs || []).slice(0, 5);
+      const allRuns = (data.recent_runs || data.runs || []).slice(0, 5);
       const timelineRows = (data.timeline || []).slice(0, 20);
       const recommendedActions = Array.isArray(derived.recommended_actions) ? derived.recommended_actions : [];
       const detail = document.getElementById('detail');
-      const gatePassed = pr.latest_gate_passed;
+      const stage = stageOf(t.status);
+      const latestRun = allRuns[0] || null;
+      const gatePassed = latestRun ? latestRun.gate_passed : null;
       const gateClass = gatePassed === null || gatePassed === undefined ? '' : (gatePassed ? 'pass' : 'fail');
       const gateText = gatePassed === null || gatePassed === undefined ? '-' : (gatePassed ? 'Passed' : 'Failed');
-      const runStatus = pr.latest_run_status || '';
+
+      // Status summary
+      let summaryText = '';
+      let needsAttention = false;
+      if (stage === 'blocked') { summaryText = 'Task is blocked and needs your attention.'; needsAttention = true; }
+      else if (stage === 'review') { summaryText = derived.latest_risk ? 'Agent completed but flagged a risk. Please review.' : 'Agent completed work. Please review.'; }
+      else if (stage === 'in_progress') { summaryText = `Agent is working on this task.${t.assigned_agent ? ' (' + t.assigned_agent + ')' : ''}`; }
+      else if (stage === 'ready') { summaryText = 'Ready to be picked up by an agent.'; }
+      else if (stage === 'todo') { summaryText = 'Queued, waiting to be prioritized.'; }
+      else if (stage === 'done') { summaryText = 'Completed.'; }
+      else if (stage === 'dropped') { summaryText = 'Dropped.'; }
+
+      // Context-aware action buttons
+      let actionButtons = '';
+      if (stage === 'review') {
+        actionButtons = `
+          <button class="btn-approve" onclick="moveTask(${t.id},'done','Approved via console',false)">Approve</button>
+          <button class="btn-reject" onclick="moveTask(${t.id},'ready','Changes requested via console',false)">Request Changes</button>
+          <button class="btn-block" onclick="moveTask(${t.id},'blocked','Blocked by human',false)">Block</button>
+        `;
+      } else if (stage === 'blocked') {
+        actionButtons = `
+          <button onclick="runTask(${t.id})">Retry</button>
+          <button class="btn-unblock" onclick="moveTask(${t.id},'ready','Unblocked by human',true)">Unblock</button>
+          <button class="btn-reject" onclick="moveTask(${t.id},'dropped','Dropped by human',true)">Drop</button>
+        `;
+      } else if (stage === 'in_progress') {
+        actionButtons = `
+          <button class="btn-block" onclick="moveTask(${t.id},'blocked','Manually blocked',false)">Block</button>
+        `;
+      } else if (stage === 'done') {
+        actionButtons = `
+          <button class="btn-reject" onclick="moveTask(${t.id},'review','Reopened',true)">Reopen</button>
+        `;
+      } else if (stage === 'dropped') {
+        actionButtons = `
+          <button class="btn-unblock" onclick="moveTask(${t.id},'todo','Restored by human',true)">Restore</button>
+        `;
+      }
 
       detail.innerHTML = `
         <!-- Header -->
         <div class="detail-header">
           <div class="detail-header-top">
             <div class="detail-title">${t.title}</div>
-            <div class="detail-badges">
-              <span class="badge">task #${t.id}</span>
-              <span class="badge-chip ${stageClass(stageOf(t.status))}">${stageOf(t.status)}</span>
-            </div>
+            <span class="badge-chip ${stageClass(stage)}">${stage.replace('_',' ')}</span>
+          </div>
+          <div class="detail-summary ${needsAttention ? 'summary-alert' : ''}">${summaryText}</div>
+          ${t.description ? `<div class="detail-description">${t.description}</div>` : ''}
+          <div class="detail-tag-row">
+            <span class="tag-badge tag-priority-${t.priority >= 4 ? 'high' : t.priority >= 3 ? 'med' : 'low'}">${priorityLabel(t.priority)}</span>
+            <span class="tag-badge tag-impact-${t.impact >= 4 ? 'high' : t.impact >= 3 ? 'med' : 'low'}">Impact: ${impactLabel(t.impact)}</span>
+            <span class="tag-badge tag-effort">Effort: ${effortLabel(t.effort)}</span>
           </div>
           <div class="detail-meta-row">
             <span class="meta-chip"><span class="meta-chip-label">Source</span> ${t.source || '-'}</span>
             ${t.external_id ? `<span class="meta-chip">${t.external_id}</span>` : ''}
             <span class="meta-chip"><span class="meta-chip-label">Agent</span> ${t.assigned_agent || '-'}</span>
-            <span class="meta-chip"><span class="meta-chip-label">Lease</span> ${t.lease_until || '-'}</span>
           </div>
-        </div>
-
-        <!-- Stats Row -->
-        <div class="detail-stats-row">
-          <div class="stat-pill">
-            <div class="stat-pill-label">Priority</div>
-            <div class="stat-pill-value">${t.priority}</div>
-          </div>
-          <div class="stat-pill">
-            <div class="stat-pill-label">Impact</div>
-            <div class="stat-pill-value">${t.impact}</div>
-          </div>
-          <div class="stat-pill">
-            <div class="stat-pill-label">Effort</div>
-            <div class="stat-pill-value">${t.effort}</div>
-          </div>
-          <div class="stat-pill">
-            <div class="stat-pill-label">Runs</div>
-            <div class="stat-pill-value">${pr.run_count || 0}</div>
-          </div>
-          <div class="stat-pill">
-            <div class="stat-pill-label">Gate</div>
-            <div class="stat-pill-value ${gateClass}">${gateText}</div>
-          </div>
-        </div>
-
-        <!-- Derived Signals -->
-        <div class="detail-section">
-          <div class="section-title">Signals</div>
-          <div class="signal-grid">
-            ${signalCard('Progress', derived.latest_progress, 'signal-progress')}
-            ${signalCard('Handoff', derived.latest_handoff, 'signal-handoff')}
-            ${signalCard('Risk', derived.latest_risk, 'signal-risk')}
-          </div>
-          ${recommendedActions.length ? `
-            <div style="margin-top:10px">
-              <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:4px;">RECOMMENDED ACTIONS</div>
-              <div class="action-list">
-                ${recommendedActions.map(a => `<span class="action-tag">${a.label || a.id || '-'}</span>`).join('')}
-              </div>
+          ${(repo || issueUrl || prUrl || prCandidates.length) ? `
+            <div class="detail-links-row">
+              ${repo ? `<a class="link-chip" href="https://github.com/${repo}" target="_blank">Repo</a>` : ''}
+              ${issueUrl ? `<a class="link-chip" href="${issueUrl}" target="_blank">Issue</a>` : ''}
+              ${prUrl ? `<a class="link-chip" href="${prUrl}" target="_blank">PR</a>` : ''}
+              ${prCandidates.length ? prCandidates.map(u => `<a class="link-chip" href="${u}" target="_blank">Related PR</a>`).join('') : ''}
             </div>
           ` : ''}
         </div>
 
-        <!-- PR & Links -->
-        <div class="detail-section">
-          <div class="section-title">PR & Links</div>
-          <div class="pr-summary-text">${pr.latest_result_summary || 'No execution summary yet'}</div>
-          ${runStatus ? `<div class="pr-status-badge ${runStatus === 'completed' || runStatus === 'succeeded' ? 'status-pass' : runStatus === 'failed' ? 'status-fail' : 'status-neutral'}">Latest run: ${runStatus}</div>` : ''}
-          <div class="link-list">
-            <div class="link-row"><span class="link-label">Repo</span>${repo ? `<a href="https://github.com/${repo}" target="_blank">${repo}</a>` : '<span class="sub">-</span>'}</div>
-            <div class="link-row"><span class="link-label">Issue</span>${issueUrl ? `<a href="${issueUrl}" target="_blank">${issueUrl}</a>` : '<span class="sub">-</span>'}</div>
-            <div class="link-row"><span class="link-label">Primary PR</span>${prUrl ? `<a href="${prUrl}" target="_blank">${prUrl}</a>` : '<span class="sub">-</span>'}</div>
-            ${prCandidates.length ? prCandidates.map(u => `<div class="link-row"><span class="link-label">Related PR</span><a href="${u}" target="_blank">${u}</a></div>`).join('') : ''}
+        ${(derived.latest_risk || (latestRun && latestRun.status === 'failed')) ? `
+          <div class="detail-alert-banner">
+            <span class="alert-icon">!</span>
+            <div>
+              <div class="alert-title">${derived.latest_risk ? 'Risk Signal Detected' : 'Last Run Failed'}</div>
+              <div class="alert-body">${derived.latest_risk ? (derived.latest_risk.summary || '-') : (latestRun.error_detail || latestRun.result_summary || 'Check execution details below')}</div>
+            </div>
           </div>
-        </div>
+        ` : ''}
 
         <!-- Actions -->
-        <div class="detail-section">
-          <div class="detail-actions-row">
-            <button onclick="runTask(${t.id})">Run Task</button>
+        ${actionButtons ? `
+          <div class="detail-actions-bar">
+            ${actionButtons}
+            <span class="action-spacer"></span>
             <details class="action-card run-advanced-box">
-              <summary class="run-advanced-summary">Advanced Route Override</summary>
-              <div class="action-row">
-                <label style="min-width:120px">Adapter</label>
-                <select id="runAdapterSel">
-                  ${(state.adapters.length ? state.adapters : ['openclaw']).map(a => `<option value="${a}">${a}</option>`).join('')}
-                </select>
-              </div>
-              <div class="action-row">
-                <label style="min-width:120px">Agent</label>
-                <input id="runAgentInput" placeholder="optional agent name" />
-              </div>
-              <div class="action-row">
-                <label><input id="runUseOverrideCk" type="checkbox" />use override for this run</label>
+              <summary class="run-advanced-summary">Advanced</summary>
+              <div class="advanced-inner">
+                <div class="action-row">
+                  <label style="min-width:80px">Adapter</label>
+                  <select id="runAdapterSel">
+                    ${(state.adapters.length ? state.adapters : ['openclaw']).map(a => `<option value="${a}">${a}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="action-row">
+                  <label style="min-width:80px">Agent</label>
+                  <input id="runAgentInput" placeholder="optional agent name" />
+                </div>
+                <div class="action-row">
+                  <label><input id="runUseOverrideCk" type="checkbox" />use override</label>
+                </div>
+                <div class="action-row" style="margin-top:4px">
+                  <input id="moveNoteInput" placeholder="add a note..." style="flex:1" />
+                  <select id="moveStatusSel" style="max-width:130px">
+                    <option value="todo">todo</option>
+                    <option value="ready">ready</option>
+                    <option value="in_progress">in_progress</option>
+                    <option value="review">review</option>
+                    <option value="done">done</option>
+                    <option value="dropped">dropped</option>
+                    <option value="blocked">blocked</option>
+                  </select>
+                  <label class="force-label"><input id="moveForceCk" type="checkbox" />force</label>
+                  <button class="secondary sm" onclick="moveTask(${t.id},null,null,null)">Move</button>
+                  <button class="sm btn-cancel-adv" onclick="this.closest('details').removeAttribute('open')">Cancel</button>
+                </div>
               </div>
             </details>
-            <span class="action-divider"></span>
-            <select id="moveStatusSel">
-              <option value="todo">todo</option>
-              <option value="ready">ready</option>
-              <option value="in_progress">in_progress</option>
-              <option value="review">review</option>
-              <option value="done">done</option>
-              <option value="dropped">dropped</option>
-              <option value="blocked">blocked</option>
-            </select>
-            <input id="moveNoteInput" placeholder="note..." style="flex:1;min-width:100px" />
-            <label class="force-label"><input id="moveForceCk" type="checkbox" />force</label>
-            <button class="secondary" onclick="moveTask(${t.id}, null, null, null)">Move</button>
           </div>
-        </div>
+        ` : `
+          <div class="detail-actions-bar">
+            <details class="action-card run-advanced-box">
+              <summary class="run-advanced-summary">Advanced</summary>
+              <div class="advanced-inner">
+                <div class="action-row">
+                  <input id="moveNoteInput" placeholder="add a note..." style="flex:1" />
+                  <select id="moveStatusSel" style="max-width:130px">
+                    <option value="todo">todo</option>
+                    <option value="ready">ready</option>
+                    <option value="in_progress">in_progress</option>
+                    <option value="review">review</option>
+                    <option value="done">done</option>
+                    <option value="dropped">dropped</option>
+                    <option value="blocked">blocked</option>
+                  </select>
+                  <label class="force-label"><input id="moveForceCk" type="checkbox" />force</label>
+                  <button class="secondary sm" onclick="moveTask(${t.id},null,null,null)">Move</button>
+                  <button class="sm btn-cancel-adv" onclick="this.closest('details').removeAttribute('open')">Cancel</button>
+                </div>
+              </div>
+            </details>
+          </div>
+        `}
 
-        <!-- Timeline -->
+        <!-- Agent's Solution -->
+        ${latestRun && latestRun.result_summary ? `
+          <div class="detail-section">
+            <div class="section-title">Agent's Summary</div>
+            <div class="solution-text">${latestRun.result_summary}</div>
+            <div class="solution-meta">
+              <span>Run #${latestRun.id}</span>
+              <span class="${statusClass(latestRun.status)}">${latestRun.status}</span>
+              <span>Gate: <span class="${gateClass}">${gateText}</span></span>
+              ${latestRun.adapter ? `<span>${latestRun.adapter}</span>` : ''}
+              ${latestRun.started_at ? `<span>${shortTime(latestRun.started_at)}</span>` : ''}
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- Execution Process (Run with Steps) -->
+        ${latestRun ? `
+          <div class="detail-section">
+            <div class="section-title">Execution Process</div>
+            ${(latestRun.steps && latestRun.steps.length) ? `
+              <div class="steps-pipeline">
+                ${latestRun.steps.map((s, i) => `
+                  <div class="step-node ${s.status === 'passed' || s.status === 'completed' || s.status === 'succeeded' ? 'step-ok' : s.status === 'failed' ? 'step-fail' : 'step-pending'}">
+                    <div class="step-connector">${i > 0 ? '<div class="step-line"></div>' : ''}</div>
+                    <div class="step-dot"></div>
+                    <div class="step-body">
+                      <div class="step-head">
+                        <span class="step-name">${friendlyStepName(s.step_name)}</span>
+                        <span class="step-status ${statusClass(s.status)}">${s.status}</span>
+                        ${s.started_at ? `<span class="step-time">${shortTime(s.started_at)}</span>` : ''}
+                      </div>
+                      ${s.log_excerpt ? `<div class="step-log"><pre>${escapeHtml(s.log_excerpt)}</pre></div>` : ''}
+                      ${s.error_code ? `<div class="step-error">${s.error_code}</div>` : ''}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : '<div class="sub">No step details recorded for this run.</div>'}
+          </div>
+        ` : ''}
+
+        <!-- Signals -->
+        ${(derived.latest_progress || derived.latest_handoff || derived.latest_risk || recommendedActions.length) ? `
+          <div class="detail-section">
+            <div class="section-title">Signals</div>
+            <div class="signal-grid">
+              ${signalCard('Progress', derived.latest_progress, 'signal-progress')}
+              ${signalCard('Handoff', derived.latest_handoff, 'signal-handoff')}
+              ${signalCard('Risk', derived.latest_risk, 'signal-risk')}
+            </div>
+            ${recommendedActions.length ? `
+              <div class="recommended-actions">
+                <span class="rec-label">Suggested:</span>
+                ${recommendedActions.map(a => `<span class="action-tag">${a.label || a.id || '-'}</span>`).join('')}
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
+
+        <!-- Activity Timeline -->
         <div class="detail-section">
-          <div class="section-title">Timeline (Latest ${timelineRows.length})</div>
+          <div class="section-title">Activity</div>
           <div class="timeline-list">
             ${timelineRows.map(e => {
               const to = e.status_to || '';
-              const when = e.occurred_at || e.recorded_at || '';
+              const when = shortTime(e.occurred_at || e.recorded_at);
               return `<div class="tl-item ${tlStatusClass(e)}">
-                <span class="tl-event">${e.event_type || 'event'}</span>
+                <span class="tl-event">${friendlyEventType(e.event_type)}</span>
                 <span class="tl-time">${when}</span>
-                <div class="tl-summary">${e.summary || '-'} &middot; ${e.status_from || '-'} &rarr; <span class="${statusClass(to)}">${to}</span></div>
+                <div class="tl-summary">${e.summary || '-'}${e.status_from && e.status_to ? ` &middot; ${e.status_from} &rarr; <span class="${statusClass(to)}">${to}</span>` : ''}</div>
               </div>`;
-            }).join('') || '<div class="sub">No timeline events</div>'}
+            }).join('') || '<div class="sub">No activity yet</div>'}
           </div>
         </div>
 
-        <!-- Recent Runs -->
-        <div class="detail-section">
-          <div class="section-title">Recent Runs (Top ${latestRuns.length})</div>
-          ${latestRuns.map(r => `
-            <div class="run-card ${r.status === 'completed' || r.status === 'succeeded' ? 'run-ok' : r.status === 'failed' ? 'run-fail' : 'run-other'}">
-              <div>
-                <span class="run-id">#${r.id}</span>
-                <span class="run-status ${statusClass(r.status)}">${r.status}</span>
+        <!-- Previous Runs -->
+        ${allRuns.length > 1 ? `
+          <div class="detail-section">
+            <div class="section-title">Previous Runs (${allRuns.length - 1})</div>
+            ${allRuns.slice(1).map(r => `
+              <div class="run-card ${r.status === 'completed' || r.status === 'succeeded' ? 'run-ok' : r.status === 'failed' ? 'run-fail' : 'run-other'}">
+                <div>
+                  <span class="run-id">#${r.id}</span>
+                  <span class="run-status ${statusClass(r.status)}">${r.status}</span>
+                </div>
+                <div style="flex:1;font-size:12px;color:var(--muted)">
+                  ${r.result_summary || ((r.steps || []).map(s => `${s.step_name}:${s.status}`).join(' &middot; ') || 'no details')}
+                </div>
+                <div class="run-meta">
+                  ${shortTime(r.started_at)} &middot; gate=${r.gate_passed ? 'pass' : 'fail'}
+                </div>
               </div>
-              <div style="flex:1;font-size:12px;color:var(--muted)">
-                ${(r.steps || []).map(s => `${s.step_name}:${s.status}`).join(' &middot; ') || 'no steps'}
-              </div>
-              <div class="run-meta">
-                ${r.adapter} &middot; ${r.agent_name}<br/>gate=${r.gate_passed ? 'pass' : 'fail'}
-              </div>
-            </div>
-          `).join('') || '<div class="sub">No runs yet</div>'}
-        </div>
+            `).join('')}
+          </div>
+        ` : ''}
       `;
       const moveSel = document.getElementById('moveStatusSel');
       if (moveSel) moveSel.value = t.status;
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function friendlyStepName(name) {
+      if (!name) return 'step';
+      const map = { claim: 'Claim Task', edit: 'Write Code', gate: 'Run Checks', execute: 'Execute', plan: 'Plan', review: 'Review' };
+      return map[name] || name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function priorityLabel(v) {
+      if (v >= 5) return 'P0 Critical';
+      if (v >= 4) return 'P1 High';
+      if (v >= 3) return 'P2 Medium';
+      if (v >= 2) return 'P3 Low';
+      return 'P4 Minimal';
+    }
+    function impactLabel(v) {
+      if (v >= 5) return 'Critical';
+      if (v >= 4) return 'High';
+      if (v >= 3) return 'Medium';
+      if (v >= 2) return 'Low';
+      return 'Minimal';
+    }
+    function effortLabel(v) {
+      if (v >= 5) return 'XL';
+      if (v >= 4) return 'L';
+      if (v >= 3) return 'M';
+      if (v >= 2) return 'S';
+      return 'XS';
+    }
+    function friendlyEventType(type) {
+      if (!type) return 'event';
+      return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+    function shortTime(ts) {
+      if (!ts) return '';
+      // Try to shorten ISO timestamps to just date+time
+      return ts.replace(/^(\d{4}-\d{2}-\d{2})T?(\d{2}:\d{2}).*$/, '$1 $2').replace(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})$/, '$2');
     }
 
     function signalCard(label, eventValue, cls) {
