@@ -1,5 +1,6 @@
     const state = {
       projects: [],
+      adapters: [],
       tasks: [],
       filtered: [],
       selectedTask: null,
@@ -64,6 +65,11 @@
         await refreshAll();
         restartStream();
       };
+    }
+
+    async function loadAdapters() {
+      const data = await api('/api/adapters');
+      state.adapters = Array.isArray(data.adapters) ? data.adapters : [];
     }
 
     function currentProject() {
@@ -168,38 +174,6 @@
       `).join('');
     }
 
-    function timelineEventLine(e) {
-      const when = e.occurred_at || e.recorded_at || '-';
-      const statusFrom = e.status_from || '-';
-      const statusTo = e.status_to || '-';
-      return `
-        <div class="timeline-item">
-          <div><strong>${e.event_type || 'event'}</strong> · <span class="${statusClass(statusTo)}">${statusTo}</span></div>
-          <div class="sub">${e.summary || '-'} | ${statusFrom} -> ${statusTo} | ${when}</div>
-        </div>
-      `;
-    }
-
-    function derivedEventCard(label, eventValue) {
-      if (!eventValue) {
-        return `
-          <div class="stat">
-            <div class="k">${label}</div>
-            <div class="v">-</div>
-            <div class="sub">No signal yet</div>
-          </div>
-        `;
-      }
-      const when = eventValue.occurred_at || eventValue.recorded_at || '-';
-      return `
-        <div class="stat">
-          <div class="k">${label}</div>
-          <div class="v">${eventValue.event_type || '-'}</div>
-          <div class="sub">${eventValue.summary || '-'}</div>
-          <div class="sub">${when}</div>
-        </div>
-      `;
-    }
 
     async function openTask(taskId) {
       const data = await api(`/api/task/${taskId}`);
@@ -221,70 +195,151 @@
       const timelineRows = (data.timeline || []).slice(0, 20);
       const recommendedActions = Array.isArray(derived.recommended_actions) ? derived.recommended_actions : [];
       const detail = document.getElementById('detail');
+      const gatePassed = pr.latest_gate_passed;
+      const gateClass = gatePassed === null || gatePassed === undefined ? '' : (gatePassed ? 'pass' : 'fail');
+      const gateText = gatePassed === null || gatePassed === undefined ? '-' : (gatePassed ? 'Passed' : 'Failed');
+      const runStatus = pr.latest_run_status || '';
+
       detail.innerHTML = `
-        <div class="detail-top">
-          <span class="badge">task #${t.id}</span>
-          <span class="badge-chip ${stageClass(stageOf(t.status))}">${stageOf(t.status)}</span>
-          <span class="badge-chip ${statusClass(t.status)}">status: ${t.status}</span>
-        </div>
-        <div class="detail-title">${t.title}</div>
-        <div class="sub">source: ${t.source || '-'} ${t.external_id || ''} · agent: ${t.assigned_agent || '-'} · lease: ${t.lease_until || '-'}</div>
-        <div class="detail-grid">
-          <div class="stat"><div class="k">Priority / Impact / Effort</div><div class="v">${t.priority} / ${t.impact} / ${t.effort}</div></div>
-          <div class="stat"><div class="k">Runs</div><div class="v">${pr.run_count || 0}</div></div>
-          <div class="stat"><div class="k">Latest Gate</div><div class="v">${pr.latest_gate_passed === null || pr.latest_gate_passed === undefined ? '-' : (pr.latest_gate_passed ? 'pass' : 'fail')}</div></div>
-        </div>
-        <div class="history">
-          <h4 style="margin:0 0 8px">Derived Signals</h4>
-          <div class="detail-grid">
-            ${derivedEventCard('Latest Progress', derived.latest_progress)}
-            ${derivedEventCard('Latest Handoff', derived.latest_handoff)}
-            ${derivedEventCard('Latest Risk', derived.latest_risk)}
+        <!-- Header -->
+        <div class="detail-header">
+          <div class="detail-header-top">
+            <div class="detail-title">${t.title}</div>
+            <div class="detail-badges">
+              <span class="badge">task #${t.id}</span>
+              <span class="badge-chip ${stageClass(stageOf(t.status))}">${stageOf(t.status)}</span>
+            </div>
           </div>
-          <div class="timeline-item">
-            <strong>Recommended Actions</strong>
-            <div class="sub">${recommendedActions.length ? recommendedActions.map(a => a.label || a.id || '-').join(', ') : 'No recommended actions'}</div>
+          <div class="detail-meta-row">
+            <span class="meta-chip"><span class="meta-chip-label">Source</span> ${t.source || '-'}</span>
+            ${t.external_id ? `<span class="meta-chip">${t.external_id}</span>` : ''}
+            <span class="meta-chip"><span class="meta-chip-label">Agent</span> ${t.assigned_agent || '-'}</span>
+            <span class="meta-chip"><span class="meta-chip-label">Lease</span> ${t.lease_until || '-'}</span>
           </div>
         </div>
-        <div class="history">
-          <h4 style="margin:0 0 8px">PR Detail</h4>
-          <div class="timeline-item">PR summary: ${pr.latest_result_summary || 'No execution summary yet'}</div>
-          <div class="timeline-item">Latest run status: ${pr.latest_run_status || '-'}</div>
-          <div class="timeline-item">Repo: ${repo ? `<a href="https://github.com/${repo}" target="_blank">${repo}</a>` : '-'}</div>
-          <div class="timeline-item">Issue: ${issueUrl ? `<a href="${issueUrl}" target="_blank">${issueUrl}</a>` : '-'}</div>
-          <div class="timeline-item">Primary PR: ${prUrl ? `<a href="${prUrl}" target="_blank">${prUrl}</a>` : '-'}</div>
-          <div class="timeline-item">Related PR Links: ${prCandidates.length ? prCandidates.map(u => `<a href="${u}" target="_blank">${u}</a>`).join('<br/>') : '-'}</div>
+
+        <!-- Stats Row -->
+        <div class="detail-stats-row">
+          <div class="stat-pill">
+            <div class="stat-pill-label">Priority</div>
+            <div class="stat-pill-value">${t.priority}</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-pill-label">Impact</div>
+            <div class="stat-pill-value">${t.impact}</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-pill-label">Effort</div>
+            <div class="stat-pill-value">${t.effort}</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-pill-label">Runs</div>
+            <div class="stat-pill-value">${pr.run_count || 0}</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-pill-label">Gate</div>
+            <div class="stat-pill-value ${gateClass}">${gateText}</div>
+          </div>
         </div>
-        <div class="detail-actions">
-          <select id="adapterSel"><option value="mock">mock</option></select>
-          <input id="agentInput" placeholder="agent name" value="web-console-agent" />
-          <button onclick="runTask(${t.id})">Run Task</button>
+
+        <!-- Derived Signals -->
+        <div class="detail-section">
+          <div class="section-title">Signals</div>
+          <div class="signal-grid">
+            ${signalCard('Progress', derived.latest_progress, 'signal-progress')}
+            ${signalCard('Handoff', derived.latest_handoff, 'signal-handoff')}
+            ${signalCard('Risk', derived.latest_risk, 'signal-risk')}
+          </div>
+          ${recommendedActions.length ? `
+            <div style="margin-top:10px">
+              <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:4px;">RECOMMENDED ACTIONS</div>
+              <div class="action-list">
+                ${recommendedActions.map(a => `<span class="action-tag">${a.label || a.id || '-'}</span>`).join('')}
+              </div>
+            </div>
+          ` : ''}
         </div>
-        <div class="detail-actions">
-          <select id="moveStatusSel">
-            <option value="todo">todo</option>
-            <option value="ready">ready</option>
-            <option value="in_progress">in_progress</option>
-            <option value="review">review</option>
-            <option value="done">done</option>
-            <option value="dropped">dropped</option>
-            <option value="blocked">blocked</option>
-          </select>
-          <input id="moveNoteInput" placeholder="note for manual transition" />
-          <label class="sub" style="display:flex;align-items:center;gap:4px;"><input id="moveForceCk" type="checkbox" style="width:auto;" />force</label>
-          <button class="secondary" onclick="moveTask(${t.id}, null, null, null)">Update Flow</button>
+
+        <!-- PR & Links -->
+        <div class="detail-section">
+          <div class="section-title">PR & Links</div>
+          <div class="pr-summary-text">${pr.latest_result_summary || 'No execution summary yet'}</div>
+          ${runStatus ? `<div class="pr-status-badge ${runStatus === 'completed' || runStatus === 'succeeded' ? 'status-pass' : runStatus === 'failed' ? 'status-fail' : 'status-neutral'}">Latest run: ${runStatus}</div>` : ''}
+          <div class="link-list">
+            <div class="link-row"><span class="link-label">Repo</span>${repo ? `<a href="https://github.com/${repo}" target="_blank">${repo}</a>` : '<span class="sub">-</span>'}</div>
+            <div class="link-row"><span class="link-label">Issue</span>${issueUrl ? `<a href="${issueUrl}" target="_blank">${issueUrl}</a>` : '<span class="sub">-</span>'}</div>
+            <div class="link-row"><span class="link-label">Primary PR</span>${prUrl ? `<a href="${prUrl}" target="_blank">${prUrl}</a>` : '<span class="sub">-</span>'}</div>
+            ${prCandidates.length ? prCandidates.map(u => `<div class="link-row"><span class="link-label">Related PR</span><a href="${u}" target="_blank">${u}</a></div>`).join('') : ''}
+          </div>
         </div>
-        <div class="history">
-          <h4 style="margin:0 0 8px">Task Timeline (Latest 20)</h4>
-          ${timelineRows.map(timelineEventLine).join('') || '<div class="sub">No timeline events</div>'}
+
+        <!-- Actions -->
+        <div class="detail-section">
+          <div class="detail-actions-row">
+            <button onclick="runTask(${t.id})">Run Task</button>
+            <details class="action-card run-advanced-box">
+              <summary class="run-advanced-summary">Advanced Route Override</summary>
+              <div class="action-row">
+                <label style="min-width:120px">Adapter</label>
+                <select id="runAdapterSel">
+                  ${(state.adapters.length ? state.adapters : ['openclaw']).map(a => `<option value="${a}">${a}</option>`).join('')}
+                </select>
+              </div>
+              <div class="action-row">
+                <label style="min-width:120px">Agent</label>
+                <input id="runAgentInput" placeholder="optional agent name" />
+              </div>
+              <div class="action-row">
+                <label><input id="runUseOverrideCk" type="checkbox" />use override for this run</label>
+              </div>
+            </details>
+            <span class="action-divider"></span>
+            <select id="moveStatusSel">
+              <option value="todo">todo</option>
+              <option value="ready">ready</option>
+              <option value="in_progress">in_progress</option>
+              <option value="review">review</option>
+              <option value="done">done</option>
+              <option value="dropped">dropped</option>
+              <option value="blocked">blocked</option>
+            </select>
+            <input id="moveNoteInput" placeholder="note..." style="flex:1;min-width:100px" />
+            <label class="force-label"><input id="moveForceCk" type="checkbox" />force</label>
+            <button class="secondary" onclick="moveTask(${t.id}, null, null, null)">Move</button>
+          </div>
         </div>
-        <div class="history">
-          <h4 style="margin:0 0 8px">Recent Runs (Top 5)</h4>
+
+        <!-- Timeline -->
+        <div class="detail-section">
+          <div class="section-title">Timeline (Latest ${timelineRows.length})</div>
+          <div class="timeline-list">
+            ${timelineRows.map(e => {
+              const to = e.status_to || '';
+              const when = e.occurred_at || e.recorded_at || '';
+              return `<div class="tl-item ${tlStatusClass(e)}">
+                <span class="tl-event">${e.event_type || 'event'}</span>
+                <span class="tl-time">${when}</span>
+                <div class="tl-summary">${e.summary || '-'} &middot; ${e.status_from || '-'} &rarr; <span class="${statusClass(to)}">${to}</span></div>
+              </div>`;
+            }).join('') || '<div class="sub">No timeline events</div>'}
+          </div>
+        </div>
+
+        <!-- Recent Runs -->
+        <div class="detail-section">
+          <div class="section-title">Recent Runs (Top ${latestRuns.length})</div>
           ${latestRuns.map(r => `
-            <div class="timeline-item">
-              <span class="${r.status === 'failed' ? 'err' : 'ok'}">run #${r.id} ${r.status}</span>
-              <div class="sub">${r.trigger_type} | ${r.adapter} | ${r.agent_name} | gate=${r.gate_passed ? 'pass' : 'fail'}</div>
-              <div class="sub">${(r.steps || []).map(s => `${s.step_name}:${s.status}`).join(' | ') || 'no steps'}</div>
+            <div class="run-card ${r.status === 'completed' || r.status === 'succeeded' ? 'run-ok' : r.status === 'failed' ? 'run-fail' : 'run-other'}">
+              <div>
+                <span class="run-id">#${r.id}</span>
+                <span class="run-status ${statusClass(r.status)}">${r.status}</span>
+              </div>
+              <div style="flex:1;font-size:12px;color:var(--muted)">
+                ${(r.steps || []).map(s => `${s.step_name}:${s.status}`).join(' &middot; ') || 'no steps'}
+              </div>
+              <div class="run-meta">
+                ${r.adapter} &middot; ${r.agent_name}<br/>gate=${r.gate_passed ? 'pass' : 'fail'}
+              </div>
             </div>
           `).join('') || '<div class="sub">No runs yet</div>'}
         </div>
@@ -293,19 +348,58 @@
       if (moveSel) moveSel.value = t.status;
     }
 
+    function signalCard(label, eventValue, cls) {
+      if (!eventValue) {
+        return `<div class="signal-card ${cls}">
+          <div class="signal-label">${label}</div>
+          <div class="signal-value">-</div>
+          <div class="signal-sub">No signal yet</div>
+        </div>`;
+      }
+      const when = eventValue.occurred_at || eventValue.recorded_at || '';
+      return `<div class="signal-card ${cls}">
+        <div class="signal-label">${label}</div>
+        <div class="signal-value">${eventValue.event_type || '-'}</div>
+        <div class="signal-sub">${eventValue.summary || '-'}${when ? ' &middot; ' + when : ''}</div>
+      </div>`;
+    }
+
+    function tlStatusClass(e) {
+      const to = e.status_to || '';
+      if (to === 'done') return 'tl-done';
+      if (to === 'blocked') return 'tl-blocked';
+      if (to === 'in_progress') return 'tl-in_progress';
+      if (to === 'review') return 'tl-review';
+      if (to === 'ready') return 'tl-ready';
+      if (to === 'todo') return 'tl-todo';
+      if (to === 'dropped') return 'tl-dropped';
+      return '';
+    }
+
     async function runTask(taskId) {
       const project = currentProject();
-      const adapter = document.getElementById('adapterSel').value;
-      const agent = document.getElementById('agentInput').value || 'web-console-agent';
+      const useOverride = Boolean(document.getElementById('runUseOverrideCk')?.checked);
+      const adapter = String(document.getElementById('runAdapterSel')?.value || '').trim();
+      const agent = String(document.getElementById('runAgentInput')?.value || '').trim();
+      const payload = { project, mode: 'auto' };
+      if (useOverride) {
+        const override = {};
+        if (adapter) override.adapter = adapter;
+        if (agent) override.agent = agent;
+        payload.mode = 'override';
+        payload.override = override;
+      }
       try {
         const res = await api(`/api/task/${taskId}/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ project, adapter, agent })
+          body: JSON.stringify(payload)
         });
         await refreshAll();
         await openTask(taskId);
-        alert(res.message || 'run completed');
+        const route = res.route || {};
+        const routeHint = route.adapter && route.agent ? ` (${route.adapter}/${route.agent})` : '';
+        alert((res.message || 'run completed') + routeHint);
       } catch (err) {
         alert(`run failed: ${err}`);
       }
@@ -332,6 +426,9 @@
     async function refreshAll() {
       if (!currentProject()) {
         await loadProjects();
+      }
+      if (!state.adapters.length) {
+        await loadAdapters();
       }
       if (!currentProject()) {
         document.getElementById('taskList').innerHTML = '<div class="task"><span class="sub">No projects yet. Create one via CLI first.</span></div>';
@@ -434,8 +531,9 @@
       let lastErr = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          await loadProjects();
-          await refreshAll();
+      await loadProjects();
+      await loadAdapters();
+      await refreshAll();
           restartStream();
           return;
         } catch (err) {

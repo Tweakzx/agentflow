@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -1012,6 +1013,10 @@ def _build_handler(
                 self._send_json({"projects": list(store.projects())})
                 return
 
+            if path == "/api/adapters":
+                self._send_json({"adapters": runner.registry.names()})
+                return
+
             if path == "/api/tasks":
                 project = query.get("project", [None])[0]
                 tasks = [_task_to_dict(t) for t in store.list_tasks(project)]
@@ -1242,14 +1247,63 @@ def _build_handler(
                     self._send_json({"error": "task not found"}, status=HTTPStatus.NOT_FOUND)
                     return
                 project = str(payload.get("project") or task.project)
-                adapter = str(payload.get("adapter") or "mock")
-                agent = str(payload.get("agent") or "web-console-agent")
+                mode = str(payload.get("mode") or "auto").strip().lower()
+                if mode not in {"auto", "override"}:
+                    self._send_json({"error": "mode must be 'auto' or 'override'"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+
+                override_raw = payload.get("override")
+                override: dict[str, Any] = override_raw if isinstance(override_raw, dict) else {}
+
+                available_adapters = runner.registry.names()
+                if not available_adapters:
+                    self._send_json({"error": "no adapters are registered"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+
+                explicit_adapter = str(override.get("adapter") or payload.get("adapter") or "").strip()
+                explicit_agent = str(override.get("agent") or payload.get("agent") or "").strip()
+
+                if explicit_adapter:
+                    if explicit_adapter not in available_adapters:
+                        self._send_json(
+                            {
+                                "error": (
+                                    f"adapter '{explicit_adapter}' not found; "
+                                    f"supported: {', '.join(sorted(available_adapters))}"
+                                )
+                            },
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    adapter = explicit_adapter
+                    route_reason = "manual_override"
+                else:
+                    env_default_adapter = str(os.environ.get("AGENTFLOW_DEFAULT_ADAPTER", "")).strip()
+                    if env_default_adapter and env_default_adapter in available_adapters:
+                        adapter = env_default_adapter
+                        route_reason = "project_default_adapter"
+                    elif "openclaw" in available_adapters:
+                        adapter = "openclaw"
+                        route_reason = "auto_openclaw"
+                    else:
+                        adapter = available_adapters[0]
+                        route_reason = "auto_first_available"
+
+                if explicit_agent:
+                    agent = explicit_agent
+                    route_reason = f"{route_reason}:agent_override"
+                else:
+                    env_default_agent = str(os.environ.get("AGENTFLOW_DEFAULT_AGENT_NAME", "")).strip()
+                    agent = env_default_agent or f"auto-{adapter}-agent"
+
                 run = runner.run_task(project, task_id, adapter, agent)
                 self._send_json(
                     {
                         "ok": run.task is not None,
                         "message": run.message,
                         "success": run.success,
+                        "mode": mode,
+                        "route": {"adapter": adapter, "agent": agent, "reason": route_reason},
                         "task": _task_to_dict(run.task) if run.task is not None else None,
                     }
                 )

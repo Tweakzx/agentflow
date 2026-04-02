@@ -77,12 +77,14 @@ class ConsoleApiTests(unittest.TestCase):
 
         stats = self._get_json("/api/stats?project=demo")
         recent = self._get_json("/api/runs/recent?project=demo&limit=5")
+        adapters = self._get_json("/api/adapters")
 
         self.assertEqual(stats["project"], "demo")
         self.assertIn("status_counts", stats)
         self.assertGreaterEqual(stats["recent_run_count"], 1)
         self.assertGreaterEqual(len(recent["runs"]), 1)
         self.assertEqual(recent["runs"][0]["task_id"], self.task_id)
+        self.assertIn("mock", adapters["adapters"])
 
     def test_api_events_streams_ledger_event_objects(self) -> None:
         self._start_server()
