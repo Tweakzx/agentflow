@@ -59,6 +59,13 @@ class Task:
         return (self.priority * 2 + self.impact * 3) / max(1, self.effort)
 
 
+def _coerce_limit(limit: int, *, minimum: int = 1, maximum: int = 1000) -> int:
+    return max(minimum, min(maximum, int(limit)))
+
+
+LedgerEventInput = dict[str, object]
+
+
 class Store:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
@@ -69,6 +76,7 @@ class Store:
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, factory=_ManagedConnection)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
         if not self._schema_ready:
@@ -282,6 +290,227 @@ class Store:
             )
             return int(cur.lastrowid)
 
+    def append_ledger_event(
+        self,
+        *,
+        project: str,
+        task_id: int | None,
+        run_id: int | None,
+        trigger_id: int | None,
+        parent_event_id: int | None,
+        event_family: str,
+        event_type: str,
+        actor_type: str,
+        actor_id: str | None,
+        source_type: str | None,
+        source_ref: str | None,
+        status_from: str | None,
+        status_to: str | None,
+        run_status_from: str | None,
+        run_status_to: str | None,
+        severity: str,
+        summary: str,
+        evidence: dict[str, object] | None,
+        next_action: dict[str, object] | None,
+        context: dict[str, object] | None,
+        idempotency_key: str | None,
+        occurred_at: str | None = None,
+    ) -> int:
+        with self.connect() as conn:
+            return self._append_ledger_event_from_conn(
+                conn,
+                project=project,
+                task_id=task_id,
+                run_id=run_id,
+                trigger_id=trigger_id,
+                parent_event_id=parent_event_id,
+                event_family=event_family,
+                event_type=event_type,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                source_type=source_type,
+                source_ref=source_ref,
+                status_from=status_from,
+                status_to=status_to,
+                run_status_from=run_status_from,
+                run_status_to=run_status_to,
+                severity=severity,
+                summary=summary,
+                evidence=evidence,
+                next_action=next_action,
+                context=context,
+                idempotency_key=idempotency_key,
+                occurred_at=occurred_at,
+            )
+
+    def _append_ledger_event_from_conn(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        project: str,
+        task_id: int | None,
+        run_id: int | None,
+        trigger_id: int | None,
+        parent_event_id: int | None,
+        event_family: str,
+        event_type: str,
+        actor_type: str,
+        actor_id: str | None,
+        source_type: str | None,
+        source_ref: str | None,
+        status_from: str | None,
+        status_to: str | None,
+        run_status_from: str | None,
+        run_status_to: str | None,
+        severity: str,
+        summary: str,
+        evidence: dict[str, object] | None,
+        next_action: dict[str, object] | None,
+        context: dict[str, object] | None,
+        idempotency_key: str | None,
+        occurred_at: str | None = None,
+    ) -> int:
+        project_id = self._project_id(conn, project)
+        self._validate_ledger_references(
+            conn,
+            project_id=project_id,
+            task_id=task_id,
+            run_id=run_id,
+            trigger_id=trigger_id,
+            parent_event_id=parent_event_id,
+        )
+        cur = conn.execute(
+            """
+            INSERT INTO ledger_events(
+                project_id, task_id, run_id, trigger_id, parent_event_id,
+                event_family, event_type, actor_type, actor_id, source_type, source_ref,
+                status_from, status_to, run_status_from, run_status_to, severity, summary,
+                evidence_json, next_action_json, context_json, idempotency_key, occurred_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+            """,
+            (
+                project_id,
+                task_id,
+                run_id,
+                trigger_id,
+                parent_event_id,
+                event_family,
+                event_type,
+                actor_type,
+                actor_id,
+                source_type,
+                source_ref,
+                status_from,
+                status_to,
+                run_status_from,
+                run_status_to,
+                severity,
+                summary,
+                json.dumps(evidence or {}, ensure_ascii=False),
+                json.dumps(next_action or {}, ensure_ascii=False),
+                json.dumps(context or {}, ensure_ascii=False),
+                idempotency_key,
+                occurred_at,
+            ),
+        )
+        return int(cur.lastrowid)
+
+    def _validate_ledger_references(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        project_id: int,
+        task_id: int | None,
+        run_id: int | None,
+        trigger_id: int | None,
+        parent_event_id: int | None,
+    ) -> None:
+        if task_id is not None:
+            row = conn.execute("SELECT project_id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is None:
+                raise ValueError(f"Task {task_id} not found")
+            if int(row["project_id"]) != project_id:
+                raise ValueError(f"Task {task_id} does not belong to project")
+
+        run_task_id: int | None = None
+        if run_id is not None:
+            row = conn.execute("SELECT project_id, task_id FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None:
+                raise ValueError(f"Run {run_id} not found")
+            if int(row["project_id"]) != project_id:
+                raise ValueError(f"Run {run_id} does not belong to project")
+            run_task_id = int(row["task_id"])
+
+        if trigger_id is not None:
+            row = conn.execute("SELECT project_id FROM triggers WHERE id = ?", (trigger_id,)).fetchone()
+            if row is None:
+                raise ValueError(f"Trigger {trigger_id} not found")
+            if int(row["project_id"]) != project_id:
+                raise ValueError(f"Trigger {trigger_id} does not belong to project")
+
+        if parent_event_id is not None:
+            row = conn.execute("SELECT project_id FROM ledger_events WHERE id = ?", (parent_event_id,)).fetchone()
+            if row is None:
+                raise ValueError(f"Parent event {parent_event_id} not found")
+            if int(row["project_id"]) != project_id:
+                raise ValueError(f"Parent event {parent_event_id} does not belong to project")
+
+        if task_id is not None and run_task_id is not None and run_task_id != task_id:
+            raise ValueError(f"Run {run_id} does not belong to task {task_id}")
+
+    def _decode_ledger_event_row(self, row: sqlite3.Row) -> dict[str, object]:
+        data = dict(row)
+        data["evidence"] = json.loads(str(data.get("evidence_json") or "{}"))
+        data["next_action"] = json.loads(str(data.get("next_action_json") or "{}"))
+        data["context"] = json.loads(str(data.get("context_json") or "{}"))
+        data.pop("evidence_json", None)
+        data.pop("next_action_json", None)
+        data.pop("context_json", None)
+        return data
+
+    def _decode_ledger_event_rows(self, rows: list[sqlite3.Row]) -> list[dict[str, object]]:
+        return [self._decode_ledger_event_row(row) for row in rows]
+
+    def _append_optional_ledger_event(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        project: str,
+        task_id: int | None,
+        status_from: str | None,
+        status_to: str | None,
+        ledger_event: LedgerEventInput | None,
+    ) -> int | None:
+        if ledger_event is None:
+            return None
+        event = dict(ledger_event)
+        return self._append_ledger_event_from_conn(
+            conn,
+            project=project,
+            task_id=task_id,
+            run_id=int(event["run_id"]) if event.get("run_id") is not None else None,
+            trigger_id=int(event["trigger_id"]) if event.get("trigger_id") is not None else None,
+            parent_event_id=int(event["parent_event_id"]) if event.get("parent_event_id") is not None else None,
+            event_family=str(event["event_family"]),
+            event_type=str(event["event_type"]),
+            actor_type=str(event["actor_type"]),
+            actor_id=str(event["actor_id"]) if event.get("actor_id") is not None else None,
+            source_type=str(event["source_type"]) if event.get("source_type") is not None else None,
+            source_ref=str(event["source_ref"]) if event.get("source_ref") is not None else None,
+            status_from=str(event["status_from"]) if event.get("status_from") is not None else status_from,
+            status_to=str(event["status_to"]) if event.get("status_to") is not None else status_to,
+            run_status_from=str(event["run_status_from"]) if event.get("run_status_from") is not None else None,
+            run_status_to=str(event["run_status_to"]) if event.get("run_status_to") is not None else None,
+            severity=str(event.get("severity") or "info"),
+            summary=str(event["summary"]),
+            evidence=event.get("evidence") if isinstance(event.get("evidence"), dict) else None,
+            next_action=event.get("next_action") if isinstance(event.get("next_action"), dict) else None,
+            context=event.get("context") if isinstance(event.get("context"), dict) else None,
+            idempotency_key=str(event["idempotency_key"]) if event.get("idempotency_key") is not None else None,
+            occurred_at=str(event["occurred_at"]) if event.get("occurred_at") is not None else None,
+        )
+
     def list_events_since(self, project: str, last_event_id: int, limit: int = 200) -> list[sqlite3.Row]:
         with self.connect() as conn:
             project_id = self._project_id(conn, project)
@@ -297,6 +526,88 @@ class Store:
                 (project_id, max(0, int(last_event_id)), max(1, min(1000, int(limit)))),
             ).fetchall()
             return list(rows)
+
+    def list_project_events(self, project: str, after_id: int = 0, limit: int = 200) -> list[dict[str, object]]:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            rows = conn.execute(
+                """
+                SELECT
+                    e.id, p.name AS project, e.project_id, e.task_id, e.run_id, e.trigger_id, e.parent_event_id,
+                    e.event_family, e.event_type, e.actor_type, e.actor_id, e.source_type, e.source_ref,
+                    e.status_from, e.status_to, e.run_status_from, e.run_status_to, e.severity, e.summary,
+                    e.evidence_json, e.next_action_json, e.context_json, e.idempotency_key, e.occurred_at,
+                    e.recorded_at
+                FROM ledger_events e
+                JOIN projects p ON p.id = e.project_id
+                WHERE e.project_id = ? AND e.id > ?
+                ORDER BY e.id ASC
+                LIMIT ?
+                """,
+                (project_id, max(0, int(after_id)), _coerce_limit(limit)),
+            ).fetchall()
+            return self._decode_ledger_event_rows(list(rows))
+
+    def list_task_timeline(self, task_id: int, limit: int = 50) -> list[dict[str, object]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    e.id, p.name AS project, e.project_id, e.task_id, e.run_id, e.trigger_id, e.parent_event_id,
+                    e.event_family, e.event_type, e.actor_type, e.actor_id, e.source_type, e.source_ref,
+                    e.status_from, e.status_to, e.run_status_from, e.run_status_to, e.severity, e.summary,
+                    e.evidence_json, e.next_action_json, e.context_json, e.idempotency_key, e.occurred_at,
+                    e.recorded_at
+                FROM ledger_events e
+                JOIN projects p ON p.id = e.project_id
+                WHERE e.task_id = ?
+                ORDER BY e.occurred_at DESC, e.id DESC
+                LIMIT ?
+                """,
+                (task_id, _coerce_limit(limit)),
+            ).fetchall()
+            return self._decode_ledger_event_rows(list(rows))
+
+    def list_run_timeline(self, run_id: int, limit: int = 100) -> list[dict[str, object]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    e.id, p.name AS project, e.project_id, e.task_id, e.run_id, e.trigger_id, e.parent_event_id,
+                    e.event_family, e.event_type, e.actor_type, e.actor_id, e.source_type, e.source_ref,
+                    e.status_from, e.status_to, e.run_status_from, e.run_status_to, e.severity, e.summary,
+                    e.evidence_json, e.next_action_json, e.context_json, e.idempotency_key, e.occurred_at,
+                    e.recorded_at
+                FROM ledger_events e
+                JOIN projects p ON p.id = e.project_id
+                WHERE e.run_id = ?
+                ORDER BY e.occurred_at DESC, e.id DESC
+                LIMIT ?
+                """,
+                (run_id, _coerce_limit(limit)),
+            ).fetchall()
+            return self._decode_ledger_event_rows(list(rows))
+
+    def list_project_audit_events(self, project: str, limit: int = 50) -> list[dict[str, object]]:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            rows = conn.execute(
+                """
+                SELECT
+                    e.id, p.name AS project, e.project_id, e.task_id, e.run_id, e.trigger_id, e.parent_event_id,
+                    e.event_family, e.event_type, e.actor_type, e.actor_id, e.source_type, e.source_ref,
+                    e.status_from, e.status_to, e.run_status_from, e.run_status_to, e.severity, e.summary,
+                    e.evidence_json, e.next_action_json, e.context_json, e.idempotency_key, e.occurred_at,
+                    e.recorded_at
+                FROM ledger_events e
+                JOIN projects p ON p.id = e.project_id
+                WHERE e.project_id = ?
+                ORDER BY e.occurred_at DESC, e.id DESC
+                LIMIT ?
+                """,
+                (project_id, _coerce_limit(limit)),
+            ).fetchall()
+            return self._decode_ledger_event_rows(list(rows))
 
     def upsert_trigger(
         self,
@@ -327,6 +638,32 @@ class Store:
                 raise ValueError("Trigger upsert failed")
             return int(row["id"])
 
+    def register_trigger_once(
+        self,
+        *,
+        project: str,
+        trigger_type: str,
+        trigger_ref: str,
+        idempotency_key: str,
+        payload: str | None = None,
+    ) -> tuple[int, bool]:
+        with self.connect() as conn:
+            project_id = self._project_id(conn, project)
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO triggers(project_id, trigger_type, trigger_ref, idempotency_key, payload)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (project_id, trigger_type, trigger_ref, idempotency_key, payload),
+            )
+            row = conn.execute(
+                "SELECT id FROM triggers WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Trigger registration failed")
+            return int(row["id"]), bool(cur.rowcount == 0)
+
     def get_trigger_by_key(self, idempotency_key: str) -> sqlite3.Row | None:
         with self.connect() as conn:
             row = conn.execute(
@@ -338,6 +675,10 @@ class Store:
                 (idempotency_key,),
             ).fetchone()
             return row
+
+    def delete_trigger_by_key(self, idempotency_key: str) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM triggers WHERE idempotency_key = ?", (idempotency_key,))
 
     def list_triggers(self, project: str | None = None) -> list[sqlite3.Row]:
         with self.connect() as conn:
@@ -496,7 +837,13 @@ class Store:
         tasks.sort(key=lambda t: (t.score, t.priority, t.impact), reverse=True)
         return tasks[:limit]
 
-    def claim_next_task(self, project: str, agent: str, lease_minutes: int = 30) -> Task | None:
+    def claim_next_task(
+        self,
+        project: str,
+        agent: str,
+        lease_minutes: int = 30,
+        ledger_event: LedgerEventInput | None = None,
+    ) -> Task | None:
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -537,11 +884,26 @@ class Store:
                 "INSERT INTO status_history(task_id, from_status, to_status, note) VALUES(?, ?, ?, ?)",
                 (task_id, from_status, "in_progress", f"claimed by {agent}"),
             )
+            self._append_optional_ledger_event(
+                conn,
+                project=project,
+                task_id=task_id,
+                status_from=from_status,
+                status_to="in_progress",
+                ledger_event=ledger_event,
+            )
             task = conn.execute(self._base_task_sql() + " WHERE t.id = ?", (task_id,)).fetchone()
             conn.commit()
             return Task(**dict(task)) if task else None
 
-    def claim_task(self, task_id: int, project: str, agent: str, lease_minutes: int = 30) -> Task | None:
+    def claim_task(
+        self,
+        task_id: int,
+        project: str,
+        agent: str,
+        lease_minutes: int = 30,
+        ledger_event: LedgerEventInput | None = None,
+    ) -> Task | None:
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -577,12 +939,37 @@ class Store:
                 "INSERT INTO status_history(task_id, from_status, to_status, note) VALUES(?, ?, ?, ?)",
                 (task_id, from_status, "in_progress", f"claimed by {agent}"),
             )
+            self._append_optional_ledger_event(
+                conn,
+                project=project,
+                task_id=task_id,
+                status_from=from_status,
+                status_to="in_progress",
+                ledger_event=ledger_event,
+            )
             task = conn.execute(self._base_task_sql() + " WHERE t.id = ?", (task_id,)).fetchone()
             conn.commit()
             return Task(**dict(task)) if task else None
 
-    def heartbeat(self, task_id: int, agent: str, lease_minutes: int = 30) -> bool:
+    def heartbeat(
+        self,
+        task_id: int,
+        agent: str,
+        lease_minutes: int = 30,
+        ledger_event: LedgerEventInput | None = None,
+    ) -> bool:
         with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT t.status, p.name AS project
+                FROM tasks t
+                JOIN projects p ON p.id = t.project_id
+                WHERE t.id = ?
+                """,
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                return False
             cur = conn.execute(
                 """
                 UPDATE tasks
@@ -594,14 +981,36 @@ class Store:
                 """,
                 (f"+{lease_minutes} minutes", task_id, agent),
             )
-            return cur.rowcount > 0
+            if cur.rowcount > 0:
+                self._append_optional_ledger_event(
+                    conn,
+                    project=str(row["project"]),
+                    task_id=task_id,
+                    status_from=str(row["status"]),
+                    status_to=str(row["status"]),
+                    ledger_event=ledger_event,
+                )
+                return True
+            return False
 
-    def release_claim(self, task_id: int, agent: str, to_status: str = "ready", note: str | None = None) -> bool:
+    def release_claim(
+        self,
+        task_id: int,
+        agent: str,
+        to_status: str = "ready",
+        note: str | None = None,
+        ledger_event: LedgerEventInput | None = None,
+    ) -> bool:
         to_status = self._normalize_status(to_status)
 
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT status FROM tasks WHERE id = ? AND assigned_agent = ?",
+                """
+                SELECT t.status, p.name AS project
+                FROM tasks t
+                JOIN projects p ON p.id = t.project_id
+                WHERE t.id = ? AND t.assigned_agent = ?
+                """,
                 (task_id, agent),
             ).fetchone()
             if row is None:
@@ -623,12 +1032,35 @@ class Store:
                 "INSERT INTO status_history(task_id, from_status, to_status, note) VALUES(?, ?, ?, ?)",
                 (task_id, from_status, to_status, note or f"released by {agent}"),
             )
+            self._append_optional_ledger_event(
+                conn,
+                project=str(row["project"]),
+                task_id=task_id,
+                status_from=from_status,
+                status_to=to_status,
+                ledger_event=ledger_event,
+            )
             return True
 
-    def move_task(self, task_id: int, to_status: str, note: str | None, force: bool = False) -> None:
+    def move_task(
+        self,
+        task_id: int,
+        to_status: str,
+        note: str | None,
+        force: bool = False,
+        ledger_event: LedgerEventInput | None = None,
+    ) -> None:
         to_status = self._normalize_status(to_status)
         with self.connect() as conn:
-            row = conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            row = conn.execute(
+                """
+                SELECT t.status, p.name AS project
+                FROM tasks t
+                JOIN projects p ON p.id = t.project_id
+                WHERE t.id = ?
+                """,
+                (task_id,),
+            ).fetchone()
             if row is None:
                 raise ValueError(f"Task {task_id} not found")
             from_status = self._normalize_status(str(row["status"]))
@@ -648,6 +1080,14 @@ class Store:
             conn.execute(
                 "INSERT INTO status_history(task_id, from_status, to_status, note) VALUES(?, ?, ?, ?)",
                 (task_id, from_status, to_status, note),
+            )
+            self._append_optional_ledger_event(
+                conn,
+                project=str(row["project"]),
+                task_id=task_id,
+                status_from=from_status,
+                status_to=to_status,
+                ledger_event=ledger_event,
             )
 
     def _validate_transition(self, from_status: str, to_status: str) -> None:

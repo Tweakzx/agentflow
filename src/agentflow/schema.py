@@ -94,6 +94,38 @@ CREATE TABLE IF NOT EXISTS triggers (
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS ledger_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    task_id INTEGER,
+    run_id INTEGER,
+    trigger_id INTEGER,
+    parent_event_id INTEGER,
+    event_family TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    actor_type TEXT NOT NULL,
+    actor_id TEXT,
+    source_type TEXT,
+    source_ref TEXT,
+    status_from TEXT,
+    status_to TEXT,
+    run_status_from TEXT,
+    run_status_to TEXT,
+    severity TEXT NOT NULL DEFAULT 'info',
+    summary TEXT NOT NULL,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    next_action_json TEXT NOT NULL DEFAULT '{}',
+    context_json TEXT NOT NULL DEFAULT '{}',
+    idempotency_key TEXT,
+    occurred_at TEXT NOT NULL DEFAULT (datetime('now')),
+    recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+    FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE SET NULL,
+    FOREIGN KEY(trigger_id) REFERENCES triggers(id) ON DELETE SET NULL,
+    FOREIGN KEY(parent_event_id) REFERENCES ledger_events(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS gate_profiles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL UNIQUE,
@@ -122,6 +154,11 @@ CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_project_id ON runs(project_id);
 CREATE INDEX IF NOT EXISTS idx_run_steps_run_id ON run_steps(run_id);
 CREATE INDEX IF NOT EXISTS idx_triggers_project_id ON triggers(project_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_events_project_id_id ON ledger_events(project_id, id);
+CREATE INDEX IF NOT EXISTS idx_ledger_events_task_id_id ON ledger_events(task_id, id);
+CREATE INDEX IF NOT EXISTS idx_ledger_events_run_id_id ON ledger_events(run_id, id);
+CREATE INDEX IF NOT EXISTS idx_ledger_events_family_type ON ledger_events(event_family, event_type);
+CREATE INDEX IF NOT EXISTS idx_ledger_events_occurred_at ON ledger_events(occurred_at, id);
 CREATE INDEX IF NOT EXISTS idx_events_project_id ON events(project_id, id);
 """
 

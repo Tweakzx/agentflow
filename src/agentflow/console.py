@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import re
+import sqlite3
 import threading
 import time
 from dataclasses import asdict
@@ -15,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 from agentflow.adapters.registry import AdapterRegistry
 from agentflow.services.discovery import IssueDiscoveryService
+from agentflow.services.ledger import derive_task_summary
 from agentflow.services.runner import Runner
 from agentflow.services.webhook import GithubCommentWebhookService
 from agentflow.store import Store
@@ -415,9 +417,9 @@ INDEX_HTML = """<!doctype html>
       }
       root.innerHTML = state.audit.map(e => `
         <div class=\"run-item\">
-          <div><strong>#${e.task_id}</strong> ${e.task_title || ''}</div>
-          <div class=\"meta\"><span class=\"${statusClass(e.from_status || '')}\">${e.from_status || '-'}</span><span>-></span><span class=\"${statusClass(e.to_status || '')}\">${e.to_status}</span><span>${e.changed_at}</span></div>
-          <div class=\"sub\">${e.note || '-'}</div>
+          <div><strong>#${e.task_id || '-'}</strong> ${e.event_type || 'event'}</div>
+          <div class=\"meta\"><span>${e.event_family || '-'}</span><span class=\"${statusClass(e.status_from || '')}\">${e.status_from || '-'}</span><span>-></span><span class=\"${statusClass(e.status_to || '')}\">${e.status_to || '-'}</span><span>${e.occurred_at || e.recorded_at || '-'}</span></div>
+          <div class=\"sub\">${e.summary || '-'}</div>
         </div>
       `).join('');
     }
@@ -774,54 +776,39 @@ class EventStreamBroker:
         self._cond = threading.Condition()
         self._events: list[dict[str, Any]] = []
 
-    def publish(self, project: str, event: str, payload: dict[str, Any]) -> int:
-        event_id = self._store.append_event(project, event, payload)
+    def publish(self, project: str, event_item: dict[str, Any]) -> int:
+        if "id" not in event_item:
+            raise ValueError("event_item must include id")
+        item = dict(event_item)
+        item["project"] = project
         with self._cond:
-            self._events.append(
-                {
-                    "id": event_id,
-                    "project": project,
-                    "event": event,
-                    "payload": payload,
-                    "ts": int(time.time()),
-                }
-            )
+            self._events.append(item)
             if len(self._events) > self._max_events:
                 self._events = self._events[-self._max_events :]
             self._cond.notify_all()
-            return event_id
+            return int(item["id"])
 
     def since(self, project: str, last_event_id: int) -> list[dict[str, Any]]:
-        rows = self._store.list_events_since(project, last_event_id, limit=self._max_events)
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            payload = row["payload"]
-            parsed = json.loads(payload) if isinstance(payload, str) else {}
-            out.append(
-                {
-                    "id": int(row["id"]),
-                    "project": str(row["project"]),
-                    "event": str(row["event"]),
-                    "payload": parsed if isinstance(parsed, dict) else {"raw": parsed},
-                    "ts": int(time.time()),
-                }
-            )
-        if out:
-            return out
+        rows = self._store.list_project_events(project, after_id=last_event_id, limit=self._max_events)
+        if rows:
+            return rows
         with self._cond:
             return [e for e in self._events if e["project"] == project and int(e["id"]) > last_event_id]
 
     def wait_for(self, project: str, last_event_id: int, timeout_sec: float = 15.0) -> list[dict[str, Any]]:
         deadline = time.time() + max(0.1, timeout_sec)
-        with self._cond:
-            while True:
-                events = [e for e in self._events if e["project"] == project and int(e["id"]) > last_event_id]
-                if events:
-                    return events
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    return []
-                self._cond.wait(timeout=remaining)
+        while True:
+            try:
+                rows = self._store.list_project_events(project, after_id=last_event_id, limit=self._max_events)
+            except sqlite3.Error:
+                return []
+            if rows:
+                return rows
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return []
+            with self._cond:
+                self._cond.wait(timeout=min(remaining, 1.0))
 
 
 def _latest_running_run_id(store: Store, task_id: int) -> int | None:
@@ -844,7 +831,33 @@ def _record_task_progress(
     run_id = _latest_running_run_id(store, task_id)
     if run_id is None:
         return {"ok": False, "error": "no running run for task"}
-    heartbeat_ok = store.heartbeat(task_id, agent, lease_minutes=lease_minutes)
+    task = store.get_task(task_id)
+    if task is None:
+        return {"ok": False, "error": "task not found"}
+    heartbeat_ok = store.heartbeat(
+        task_id,
+        agent,
+        lease_minutes=lease_minutes,
+        ledger_event={
+            "run_id": run_id,
+            "event_family": "feedback",
+            "event_type": "progress.reported",
+            "actor_type": "agent",
+            "actor_id": agent,
+            "source_type": "manual",
+            "source_ref": f"console:task:{task_id}:progress",
+            "run_status_from": "running",
+            "run_status_to": "running",
+            "severity": "info",
+            "summary": f"{agent} reported progress on {step}",
+            "evidence": {
+                "step": step,
+                "detail": detail,
+                "status": status,
+            },
+            "context": {"lease_minutes": lease_minutes},
+        },
+    )
     if not heartbeat_ok:
         return {"ok": False, "error": "heartbeat ignored (not owner or not in_progress)"}
     step_id = store.append_run_step(run_id, step, status, detail or None)
@@ -922,15 +935,22 @@ def _build_handler(
         return _read_text_or_fallback(CONSOLE_JS_PATH, js_cache) if reload_assets else js_cache
 
     def _on_async_run_finished(project: str, task_id: int, run: Any) -> None:
-        payload = {
-            "task_id": task_id,
-            "success": bool(getattr(run, "success", False)),
-            "message": str(getattr(run, "message", "")),
-        }
-        task = getattr(run, "task", None)
-        if task is not None:
-            payload["status"] = getattr(task, "status", None)
-        broker.publish(project, "task_update", payload)
+        timeline = store.list_task_timeline(task_id, limit=1)
+        if timeline:
+            broker.publish(project, timeline[0])
+
+    def _publish_latest_task_event(task_id: int) -> None:
+        task = store.get_task(task_id)
+        if task is None:
+            return
+        timeline = store.list_task_timeline(task_id, limit=1)
+        if timeline:
+            broker.publish(task.project, timeline[0])
+
+    def _publish_latest_run_event(run_id: int) -> None:
+        timeline = store.list_run_timeline(run_id, limit=1)
+        if timeline:
+            broker.publish(str(timeline[0]["project"]), timeline[0])
 
     class ConsoleHandler(BaseHTTPRequestHandler):
         server_version = "AgentFlowConsole/0.2"
@@ -1059,16 +1079,9 @@ def _build_handler(
                 self.end_headers()
 
                 def emit(event_item: dict[str, Any]) -> None:
-                    payload = {
-                        "id": int(event_item["id"]),
-                        "project": event_item["project"],
-                        "event": event_item["event"],
-                        "payload": event_item["payload"],
-                        "ts": int(event_item["ts"]),
-                    }
-                    self.wfile.write(f"id: {payload['id']}\n".encode("utf-8"))
-                    self.wfile.write(f"event: {payload['event']}\n".encode("utf-8"))
-                    self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
+                    self.wfile.write(f"id: {int(event_item['id'])}\n".encode("utf-8"))
+                    self.wfile.write(f"event: {event_item['event_type']}\n".encode("utf-8"))
+                    self.wfile.write(f"data: {json.dumps(event_item)}\n\n".encode("utf-8"))
 
                 try:
                     backlog = broker.since(project, last_event_id)
@@ -1100,7 +1113,7 @@ def _build_handler(
                     limit = max(1, min(200, int(raw_limit)))
                 except ValueError:
                     limit = 50
-                rows = [_row_to_dict(r) for r in store.list_recent_status_history(project, limit=limit)]
+                rows = store.list_project_audit_events(project, limit=limit)
                 self._send_json({"project": project, "events": rows})
                 return
 
@@ -1116,27 +1129,31 @@ def _build_handler(
                     if task is None:
                         self._send_json({"error": "task not found"}, status=HTTPStatus.NOT_FOUND)
                         return
-                    runs = [_row_to_dict(r) for r in store.list_runs(task_id)]
-                    for run in runs:
+                    recent_runs = [_row_to_dict(r) for r in store.list_runs(task_id)]
+                    for run in recent_runs:
                         run["steps"] = [_row_to_dict(s) for s in store.list_run_steps(int(run["id"]))]
+                    timeline = store.list_task_timeline(task_id, limit=50)
                     history = [_row_to_dict(h) for h in store.list_status_history(task_id)]
                     task_dict = _task_to_dict(task)
                     repo = store.get_project_repo(task.project)
-                    latest_run = runs[0] if runs else None
-                    links = _build_task_links(task_dict, repo, runs)
+                    latest_run = recent_runs[0] if recent_runs else None
+                    links = _build_task_links(task_dict, repo, recent_runs)
                     pr_summary = {
                         "latest_run_status": latest_run["status"] if latest_run else None,
                         "latest_gate_passed": bool(latest_run["gate_passed"]) if latest_run else None,
                         "latest_result_summary": latest_run["result_summary"] if latest_run else None,
-                        "run_count": len(runs),
+                        "run_count": len(recent_runs),
                     }
                     self._send_json(
                         {
                             "task": task_dict,
-                            "runs": runs,
+                            "runs": recent_runs,
+                            "recent_runs": recent_runs,
+                            "timeline": timeline,
                             "history": history,
                             "links": links,
                             "pr_summary": pr_summary,
+                            "derived_summary": derive_task_summary(timeline),
                         }
                     )
                     return
@@ -1155,17 +1172,6 @@ def _build_handler(
                 if not out.get("ok"):
                     self._send_json({"ok": False, "error": out.get("error")}, status=HTTPStatus.BAD_REQUEST)
                     return
-                task = out.get("task")
-                if isinstance(task, dict):
-                    broker.publish(
-                        str(task.get("project") or payload.get("project") or ""),
-                        "task_update",
-                        {
-                            "task_id": out["task_id"],
-                            "status": str(task.get("status") or "todo"),
-                            "source": "api_create",
-                        },
-                    )
                 self._send_json({"ok": True, "task_id": out["task_id"], "task": out.get("task")})
                 return
 
@@ -1208,21 +1214,7 @@ def _build_handler(
                 if not out.get("ok"):
                     self._send_json({"ok": False, "error": out.get("error")}, status=HTTPStatus.CONFLICT)
                     return
-                updated = store.get_task(task_id)
-                project = updated.project if updated is not None else task.project
-                broker.publish(
-                    project,
-                    "progress",
-                    {
-                        "task_id": task_id,
-                        "run_id": out["run_id"],
-                        "step_id": out["step_id"],
-                        "agent": agent,
-                        "step": step,
-                        "status": step_status,
-                        "detail": detail,
-                    },
-                )
+                _publish_latest_run_event(int(out["run_id"]))
                 self._send_json(
                     {
                         "ok": True,
@@ -1262,17 +1254,7 @@ def _build_handler(
                     }
                 )
                 if run.task is not None:
-                    broker.publish(
-                        run.task.project,
-                        "task_update",
-                        {
-                            "task_id": run.task.id,
-                            "status": run.task.status,
-                            "adapter": adapter,
-                            "agent": agent,
-                            "message": run.message,
-                        },
-                    )
+                    _publish_latest_task_event(run.task.id)
                 return
 
             if path.startswith("/api/task/") and path.endswith("/move"):
@@ -1317,7 +1299,26 @@ def _build_handler(
                 final_note = str(note) if note is not None else ""
                 final_note = f"[manual-web] {final_note}".strip()
                 try:
-                    store.move_task(task_id, to_status, final_note, force=force)
+                    store.move_task(
+                        task_id,
+                        to_status,
+                        final_note,
+                        force=force,
+                        ledger_event={
+                            "event_family": "governance",
+                            "event_type": "task.force_moved",
+                            "actor_type": "user",
+                            "actor_id": "web-console",
+                            "source_type": "manual",
+                            "source_ref": f"console:task:{task_id}:move",
+                            "severity": "warning",
+                            "summary": f"Manual force move to {to_status}: {final_note}",
+                            "evidence": {"force": True, "note": final_note},
+                            "context": {"stage": _flow_stage_for_status(to_status)},
+                        }
+                        if force
+                        else None,
+                    )
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
                     return
@@ -1331,16 +1332,7 @@ def _build_handler(
                     }
                 )
                 if task is not None:
-                    broker.publish(
-                        task.project,
-                        "task_update",
-                        {
-                            "task_id": task.id,
-                            "status": task.status,
-                            "to_status": to_status,
-                            "source": "manual_move",
-                        },
-                    )
+                    _publish_latest_task_event(task.id)
                 return
 
             if path in {"/webhook/github", "/webhook/github/comment", "/webhook/github/issues"}:
@@ -1370,7 +1362,6 @@ def _build_handler(
                     else:
                         issues = []
                     result = discovery.ingest_issues(project, issues)
-                    broker.publish(project, "ingest", {"created": result.created, "skipped": result.skipped, "source": "issues_webhook"})
                     self._send_json({"ok": True, "created": result.created, "skipped": result.skipped})
                     return
 
@@ -1382,18 +1373,6 @@ def _build_handler(
                         agent_name=agent,
                         async_run=True,
                         on_run_finished=_on_async_run_finished,
-                    )
-                    broker.publish(
-                        project,
-                        "webhook_run",
-                        {
-                            "accepted": result.accepted,
-                            "duplicate": result.duplicate,
-                            "run_success": result.run_success,
-                            "message": result.message,
-                            "adapter": adapter,
-                            "agent": agent,
-                        },
                     )
                     self._send_json(
                         {
@@ -1416,19 +1395,6 @@ def _build_handler(
                         async_run=True,
                         on_run_finished=_on_async_run_finished,
                     )
-                    broker.publish(
-                        project,
-                        "webhook_run",
-                        {
-                            "accepted": result.accepted,
-                            "duplicate": result.duplicate,
-                            "run_success": result.run_success,
-                            "message": result.message,
-                            "adapter": adapter,
-                            "agent": agent,
-                            "event": event,
-                        },
-                    )
                     self._send_json(
                         {
                             "ok": True,
@@ -1446,11 +1412,6 @@ def _build_handler(
                     issue = payload.get("issue")
                     if action in {"opened", "reopened"} and isinstance(issue, dict):
                         result = discovery.ingest_issues(project, [issue])
-                        broker.publish(
-                            project,
-                            "ingest",
-                            {"created": result.created, "skipped": result.skipped, "source": "github_issues_event"},
-                        )
                         self._send_json({"ok": True, "event": event, "created": result.created, "skipped": result.skipped})
                         return
                     self._send_json({"ok": True, "event": event, "message": "ignored issues action"})

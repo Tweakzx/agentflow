@@ -112,12 +112,147 @@ class ConsoleFlowTests(unittest.TestCase):
             store = Store(str(db))
             store.create_project("demo", "example/demo")
             broker = EventStreamBroker(store)
-            first = broker.publish("demo", "task_update", {"task_id": 1})
-            second = broker.publish("demo", "progress", {"task_id": 1})
+            first_event_id = store.append_ledger_event(
+                project="demo",
+                task_id=None,
+                run_id=None,
+                trigger_id=None,
+                parent_event_id=None,
+                event_family="feedback",
+                event_type="progress.reported",
+                actor_type="agent",
+                actor_id="worker-a",
+                source_type="manual",
+                source_ref="test:first",
+                status_from=None,
+                status_to=None,
+                run_status_from=None,
+                run_status_to=None,
+                severity="info",
+                summary="worker-a reported progress",
+                evidence={"step": "tests"},
+                next_action=None,
+                context={},
+                idempotency_key="console-flow-first",
+            )
+            second_event_id = store.append_ledger_event(
+                project="demo",
+                task_id=None,
+                run_id=None,
+                trigger_id=None,
+                parent_event_id=None,
+                event_family="feedback",
+                event_type="comment.received",
+                actor_type="user",
+                actor_id="reviewer",
+                source_type="github",
+                source_ref="issue#1:comment#2",
+                status_from=None,
+                status_to=None,
+                run_status_from=None,
+                run_status_to=None,
+                severity="info",
+                summary="reviewer left feedback",
+                evidence={"task_id": 1},
+                next_action=None,
+                context={},
+                idempotency_key="console-flow-second",
+            )
+            first = broker.publish("demo", store.list_project_events("demo", after_id=max(0, first_event_id - 1), limit=1)[0])
+            second = broker.publish("demo", store.list_project_events("demo", after_id=max(0, second_event_id - 1), limit=1)[0])
             self.assertLess(first, second)
             events = broker.since("demo", first)
             self.assertEqual(1, len(events))
-            self.assertEqual("progress", events[0]["event"])
+            self.assertEqual("feedback", events[0]["event_family"])
+            self.assertEqual("comment.received", events[0]["event_type"])
+            self.assertEqual({"task_id": 1}, events[0]["evidence"])
+            self.assertNotIn("payload", events[0])
+
+    def test_event_stream_broker_wait_for_returns_all_store_events_after_last_seen(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "test.db"
+            store = Store(str(db))
+            store.create_project("demo", "example/demo")
+            broker = EventStreamBroker(store)
+            first_id = store.append_ledger_event(
+                project="demo",
+                task_id=None,
+                run_id=None,
+                trigger_id=None,
+                parent_event_id=None,
+                event_family="execution",
+                event_type="run.started",
+                actor_type="agent",
+                actor_id="worker-a",
+                source_type="manual",
+                source_ref="test:first",
+                status_from=None,
+                status_to=None,
+                run_status_from=None,
+                run_status_to="running",
+                severity="info",
+                summary="run started",
+                evidence={},
+                next_action=None,
+                context={},
+                idempotency_key="console-flow-live-1",
+            )
+            second_id = store.append_ledger_event(
+                project="demo",
+                task_id=None,
+                run_id=None,
+                trigger_id=None,
+                parent_event_id=None,
+                event_family="execution",
+                event_type="step.started",
+                actor_type="agent",
+                actor_id="worker-a",
+                source_type="manual",
+                source_ref="test:second",
+                status_from=None,
+                status_to=None,
+                run_status_from="running",
+                run_status_to="running",
+                severity="info",
+                summary="step started",
+                evidence={},
+                next_action=None,
+                context={},
+                idempotency_key="console-flow-live-2",
+            )
+            third_event_id = store.append_ledger_event(
+                project="demo",
+                task_id=None,
+                run_id=None,
+                trigger_id=None,
+                parent_event_id=None,
+                event_family="execution",
+                event_type="run.finished",
+                actor_type="agent",
+                actor_id="worker-a",
+                source_type="manual",
+                source_ref="test:third",
+                status_from=None,
+                status_to=None,
+                run_status_from="running",
+                run_status_to="passed",
+                severity="info",
+                summary="run finished",
+                evidence={},
+                next_action=None,
+                context={},
+                idempotency_key="console-flow-live-3",
+            )
+            self.assertLess(first_id, second_id)
+            self.assertLess(second_id, third_event_id)
+
+            broker.publish("demo", store.list_project_events("demo", after_id=max(0, third_event_id - 1), limit=1)[0])
+            events = broker.wait_for("demo", first_id, timeout_sec=0.5)
+
+            self.assertEqual(
+                ["step.started", "run.finished"],
+                [str(event["event_type"]) for event in events],
+            )
 
     def test_create_task_from_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -153,6 +288,12 @@ class ConsoleFlowTests(unittest.TestCase):
     def test_task_list_uses_collapsible_status_groups(self) -> None:
         self.assertIn('status-accordion', CONSOLE_JS)
         self.assertIn('class="status-group"', CONSOLE_JS)
+
+    def test_console_audit_renderer_uses_ledger_fields(self) -> None:
+        self.assertIn("e.event_type", CONSOLE_JS)
+        self.assertIn("e.status_from", CONSOLE_JS)
+        self.assertIn("e.occurred_at || e.recorded_at", CONSOLE_JS)
+        self.assertIn("e.summary", CONSOLE_JS)
 
     def test_console_does_not_include_custom_favicon(self) -> None:
         self.assertIn('rel="icon"', INDEX_HTML)

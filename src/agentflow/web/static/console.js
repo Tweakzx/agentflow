@@ -161,9 +161,9 @@
       }
       root.innerHTML = state.audit.map(e => `
         <div class="run-item">
-          <div><strong>#${e.task_id}</strong> ${e.task_title || ''}</div>
-          <div class="meta"><span class="${statusClass(e.from_status || '')}">${e.from_status || '-'}</span><span>-></span><span class="${statusClass(e.to_status || '')}">${e.to_status}</span><span>${e.changed_at}</span></div>
-          <div class="sub">${e.note || '-'}</div>
+          <div><strong>#${e.task_id || '-'}</strong> ${e.event_type || 'event'}</div>
+          <div class="meta"><span>${e.event_family || '-'}</span><span class="${statusClass(e.status_from || '')}">${e.status_from || '-'}</span><span>-></span><span class="${statusClass(e.status_to || '')}">${e.status_to || '-'}</span><span>${e.occurred_at || e.recorded_at || '-'}</span></div>
+          <div class="sub">${e.summary || '-'}</div>
         </div>
       `).join('');
     }

@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib import request
 
 from agentflow.adapters.registry import AdapterRegistry
-from agentflow.console import _build_handler
+from agentflow.console import _build_handler, _record_task_progress
 from agentflow.services.discovery import IssueDiscoveryService
 from agentflow.services.runner import Runner
 from agentflow.services.webhook import GithubCommentWebhookService
@@ -84,6 +84,31 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(recent["runs"]), 1)
         self.assertEqual(recent["runs"][0]["task_id"], self.task_id)
 
+    def test_api_events_streams_ledger_event_objects(self) -> None:
+        self._start_server()
+        runner = Runner(self.store, AdapterRegistry())
+        run_result = runner.run_task("demo", self.task_id, "mock", "tester")
+        self.assertTrue(run_result.success)
+
+        req = request.Request(f"{self.base}/api/events?project=demo&last_event_id=0")
+        with request.urlopen(req, timeout=5) as resp:
+            lines = []
+            while True:
+                line = resp.readline().decode("utf-8").strip()
+                if not line:
+                    break
+                lines.append(line)
+                if len(lines) > 10:
+                    break
+
+        data_line = next(line for line in lines if line.startswith("data: "))
+        payload = json.loads(data_line.removeprefix("data: "))
+        self.assertIn("event_family", payload)
+        self.assertIn("event_type", payload)
+        self.assertIn("summary", payload)
+        self.assertIn("evidence", payload)
+        self.assertNotIn("payload", payload)
+
     def test_comment_webhook_endpoint_is_idempotent(self) -> None:
         self._start_server()
         payload = {
@@ -126,6 +151,48 @@ class ConsoleApiTests(unittest.TestCase):
         self.assertEqual("running-tests", steps[-1]["step_name"])
         self.assertIn("3/10", steps[-1]["log_excerpt"])
 
+        run_timeline = self.store.list_run_timeline(run_id, limit=20)
+        progress_events = [event for event in run_timeline if event["event_type"] == "progress.reported"]
+        self.assertEqual(1, len(progress_events))
+        self.assertEqual("bot-a", progress_events[0]["actor_id"])
+        self.assertEqual("running-tests", progress_events[0]["evidence"].get("step"))
+        self.assertEqual("3/10 passed", progress_events[0]["evidence"].get("detail"))
+        self.assertEqual("in_progress", progress_events[0]["evidence"].get("status"))
+
+    def test_force_move_writes_force_moved_event(self) -> None:
+        self._start_server()
+
+        status, out = self._post_json(
+            f"/api/task/{self.task_id}/move",
+            {"to_status": "done", "note": "override after manual verification", "force": True},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(out["ok"])
+        self.assertEqual("done", out["task"]["status"])
+
+        timeline = self.store.list_task_timeline(self.task_id, limit=20)
+        force_events = [event for event in timeline if event["event_type"] == "task.force_moved"]
+        self.assertEqual(1, len(force_events))
+        self.assertEqual("todo", force_events[0]["status_from"])
+        self.assertEqual("done", force_events[0]["status_to"])
+        self.assertEqual("manual", force_events[0]["source_type"])
+        self.assertIn("override after manual verification", force_events[0]["summary"])
+
+    def test_audit_endpoint_reads_project_audit_events(self) -> None:
+        self._start_server()
+        runner = Runner(self.store, AdapterRegistry())
+        run_result = runner.run_task("demo", self.task_id, "mock", "tester")
+        self.assertTrue(run_result.success)
+
+        data = self._get_json("/api/audit?project=demo&limit=10")
+
+        self.assertEqual("demo", data["project"])
+        self.assertGreaterEqual(len(data["events"]), 1)
+        self.assertIn("event_family", data["events"][0])
+        self.assertIn("event_type", data["events"][0])
+        self.assertIn("summary", data["events"][0])
+        self.assertNotIn("payload", data["events"][0])
+
     def test_webhook_signature_required_when_secret_enabled(self) -> None:
         secret = "top-secret"
         self._start_server(secret=secret)
@@ -150,6 +217,79 @@ class ConsoleApiTests(unittest.TestCase):
 
         self.assertEqual(resp.status, 200)
         self.assertTrue(data["accepted"])
+
+    def test_task_detail_includes_timeline_recent_runs_and_summary(self) -> None:
+        self._start_server()
+        runner = Runner(self.store, AdapterRegistry())
+        run_result = runner.run_task("demo", self.task_id, "mock", "tester")
+        self.assertTrue(run_result.success)
+
+        data = self._get_json(f"/api/task/{self.task_id}")
+
+        self.assertIn("task", data)
+        self.assertIn("timeline", data)
+        self.assertIn("recent_runs", data)
+        self.assertIn("derived_summary", data)
+        self.assertEqual(self.task_id, data["task"]["id"])
+        self.assertGreaterEqual(len(data["timeline"]), 1)
+        self.assertGreaterEqual(len(data["recent_runs"]), 1)
+        self.assertIsInstance(data["derived_summary"], dict)
+
+    def test_progress_helper_and_force_move_use_store_ledger_hooks(self) -> None:
+        claimed = self.store.claim_task(self.task_id, "demo", "bot-a", lease_minutes=20)
+        self.assertIsNotNone(claimed)
+        run_id = self.store.create_run(
+            task_id=self.task_id,
+            project="demo",
+            trigger_type="manual",
+            trigger_ref="runner:mock",
+            adapter="mock",
+            agent_name="bot-a",
+            idempotency_key="progress-helper-1",
+        )
+
+        out = _record_task_progress(
+            self.store,
+            task_id=self.task_id,
+            agent="bot-a",
+            step="running-tests",
+            detail="3/10 passed",
+            status="in_progress",
+            lease_minutes=30,
+        )
+        self.assertTrue(out["ok"])
+        self.assertEqual(run_id, out["run_id"])
+
+        run_timeline = self.store.list_run_timeline(run_id, limit=20)
+        progress_events = [event for event in run_timeline if event["event_type"] == "progress.reported"]
+        self.assertEqual(1, len(progress_events))
+        self.assertEqual("running-tests", progress_events[0]["evidence"].get("step"))
+        self.assertEqual("3/10 passed", progress_events[0]["evidence"].get("detail"))
+
+        self.store.move_task(
+            self.task_id,
+            "done",
+            "[manual-web] override after manual verification",
+            force=True,
+            ledger_event={
+                "event_family": "governance",
+                "event_type": "task.force_moved",
+                "actor_type": "user",
+                "actor_id": "web-console",
+                "source_type": "manual",
+                "source_ref": f"console:task:{self.task_id}:move",
+                "severity": "warning",
+                "summary": "Manual force move to done: [manual-web] override after manual verification",
+                "evidence": {"force": True, "note": "[manual-web] override after manual verification"},
+                "context": {"stage": "done"},
+            },
+        )
+
+        timeline = self.store.list_task_timeline(self.task_id, limit=20)
+        force_events = [event for event in timeline if event["event_type"] == "task.force_moved"]
+        self.assertEqual(1, len(force_events))
+        self.assertEqual("in_progress", force_events[0]["status_from"])
+        self.assertEqual("done", force_events[0]["status_to"])
 
 
 if __name__ == "__main__":

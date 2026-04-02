@@ -214,6 +214,382 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(1, len(rows))
         self.assertEqual("progress", rows[0]["event"])
 
+    def test_store_connections_enable_foreign_keys(self) -> None:
+        with self.store.connect() as conn:
+            self.assertEqual(1, int(conn.execute("PRAGMA foreign_keys").fetchone()[0]))
+
+    def test_append_ledger_event_and_list_task_timeline(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="ledger-event-test",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=3,
+            source="manual",
+            external_id=None,
+        )
+        run_id = self.store.create_run(
+            task_id=task_id,
+            project="demo",
+            trigger_type="manual",
+            trigger_ref="cli:test",
+            adapter="mock",
+            agent_name="codex-a",
+            idempotency_key="ledger-event-test-run",
+        )
+
+        event_id = self.store.append_ledger_event(
+            project="demo",
+            task_id=task_id,
+            run_id=run_id,
+            trigger_id=None,
+            parent_event_id=None,
+            event_family="execution",
+            event_type="run.started",
+            actor_type="agent",
+            actor_id="codex-a",
+            source_type="manual",
+            source_ref="cli:test",
+            status_from="ready",
+            status_to="in_progress",
+            run_status_from=None,
+            run_status_to="running",
+            severity="info",
+            summary="Run started for task #1",
+            evidence={"step_name": "claim"},
+            next_action={"recommended": "observe"},
+            context={"adapter": "mock"},
+            idempotency_key="ledger-event-test-event",
+        )
+
+        task_rows = self.store.list_task_timeline(task_id, limit=10)
+        self.assertEqual(event_id, int(task_rows[0]["id"]))
+        self.assertEqual("run.started", task_rows[0]["event_type"])
+        self.assertEqual({"step_name": "claim"}, task_rows[0]["evidence"])
+        self.assertEqual({"recommended": "observe"}, task_rows[0]["next_action"])
+        self.assertEqual({"adapter": "mock"}, task_rows[0]["context"])
+        self.assertNotIn("evidence_json", task_rows[0])
+        self.assertNotIn("next_action_json", task_rows[0])
+        self.assertNotIn("context_json", task_rows[0])
+
+    def test_ledger_event_queries_cover_project_run_and_audit_views(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="ledger-event-queries",
+            description=None,
+            priority=4,
+            impact=4,
+            effort=2,
+            source="manual",
+            external_id=None,
+        )
+        run_id = self.store.create_run(
+            task_id=task_id,
+            project="demo",
+            trigger_type="manual",
+            trigger_ref="cli:test",
+            adapter="mock",
+            agent_name="codex-b",
+            idempotency_key="ledger-event-queries-run",
+        )
+        self.store.append_ledger_event(
+            project="demo",
+            task_id=task_id,
+            run_id=run_id,
+            trigger_id=None,
+            parent_event_id=None,
+            event_family="feedback",
+            event_type="progress.reported",
+            actor_type="human",
+            actor_id="reviewer",
+            source_type="manual",
+            source_ref="cli:test",
+            status_from="in_progress",
+            status_to="in_progress",
+            run_status_from="running",
+            run_status_to="running",
+            severity="info",
+            summary="Progress noted",
+            evidence={"note": "keep going"},
+            next_action={"recommended": "continue"},
+            context={"channel": "cli"},
+            idempotency_key="ledger-event-queries-event",
+        )
+
+        project_rows = self.store.list_project_events("demo", after_id=0, limit=10)
+        run_rows = self.store.list_run_timeline(run_id, limit=10)
+        audit_rows = self.store.list_project_audit_events("demo", limit=10)
+
+        self.assertEqual(1, len(project_rows))
+        self.assertEqual(1, len(run_rows))
+        self.assertEqual(1, len(audit_rows))
+        self.assertEqual("progress.reported", project_rows[0]["event_type"])
+        self.assertEqual("progress.reported", run_rows[0]["event_type"])
+        self.assertEqual("progress.reported", audit_rows[0]["event_type"])
+        self.assertEqual({"note": "keep going"}, project_rows[0]["evidence"])
+
+    def test_ledger_event_rejects_invalid_and_cross_project_references(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="reference-test",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=3,
+            source="manual",
+            external_id=None,
+        )
+        run_id = self.store.create_run(
+            task_id=task_id,
+            project="demo",
+            trigger_type="manual",
+            trigger_ref="cli:test",
+            adapter="mock",
+            agent_name="codex-c",
+            idempotency_key="reference-test-run",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Task 999999 not found"):
+            self.store.append_ledger_event(
+                project="demo",
+                task_id=999999,
+                run_id=None,
+                trigger_id=None,
+                parent_event_id=None,
+                event_family="execution",
+                event_type="run.started",
+                actor_type="system",
+                actor_id=None,
+                source_type=None,
+                source_ref=None,
+                status_from=None,
+                status_to=None,
+                run_status_from=None,
+                run_status_to=None,
+                severity="info",
+                summary="missing task",
+                evidence=None,
+                next_action=None,
+                context=None,
+                idempotency_key="missing-task-event",
+            )
+
+        self.store.create_project("other", "example/other")
+        other_task_id = self.store.add_task(
+            project="other",
+            title="cross-project-task",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=3,
+            source="manual",
+            external_id=None,
+        )
+        other_run_id = self.store.create_run(
+            task_id=other_task_id,
+            project="other",
+            trigger_type="manual",
+            trigger_ref="cli:other",
+            adapter="mock",
+            agent_name="codex-d",
+            idempotency_key="cross-project-run",
+        )
+        other_trigger_id = self.store.upsert_trigger(
+            project="other",
+            trigger_type="manual",
+            trigger_ref="cli:other",
+            idempotency_key="cross-project-trigger",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Run .* does not belong to project"):
+            self.store.append_ledger_event(
+                project="demo",
+                task_id=task_id,
+                run_id=other_run_id,
+                trigger_id=None,
+                parent_event_id=None,
+                event_family="execution",
+                event_type="run.started",
+                actor_type="system",
+                actor_id=None,
+                source_type=None,
+                source_ref=None,
+                status_from=None,
+                status_to=None,
+                run_status_from=None,
+                run_status_to=None,
+                severity="info",
+                summary="cross project run",
+                evidence=None,
+                next_action=None,
+                context=None,
+                idempotency_key="cross-project-run-event",
+            )
+
+        with self.assertRaisesRegex(ValueError, "Trigger .* does not belong to project"):
+            self.store.append_ledger_event(
+                project="demo",
+                task_id=task_id,
+                run_id=None,
+                trigger_id=other_trigger_id,
+                parent_event_id=None,
+                event_family="dispatch",
+                event_type="task.claimed",
+                actor_type="system",
+                actor_id=None,
+                source_type=None,
+                source_ref=None,
+                status_from=None,
+                status_to=None,
+                run_status_from=None,
+                run_status_to=None,
+                severity="info",
+                summary="cross project trigger",
+                evidence=None,
+                next_action=None,
+                context=None,
+                idempotency_key="cross-project-trigger-event",
+            )
+
+        seed_event_id = self.store.append_ledger_event(
+            project="demo",
+            task_id=task_id,
+            run_id=run_id,
+            trigger_id=None,
+            parent_event_id=None,
+            event_family="execution",
+            event_type="run.started",
+            actor_type="agent",
+            actor_id="codex-c",
+            source_type="manual",
+            source_ref="cli:test",
+            status_from="ready",
+            status_to="in_progress",
+            run_status_from="running",
+            run_status_to="running",
+            severity="info",
+            summary="reference seed event",
+            evidence=None,
+            next_action=None,
+            context=None,
+            idempotency_key="reference-seed-event",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Parent event .* does not belong to project"):
+            self.store.append_ledger_event(
+                project="other",
+                task_id=other_task_id,
+                run_id=other_run_id,
+                trigger_id=None,
+                parent_event_id=seed_event_id,
+                event_family="feedback",
+                event_type="handoff.recorded",
+                actor_type="human",
+                actor_id="reviewer",
+                source_type="manual",
+                source_ref="cli:other",
+                status_from="ready",
+                status_to="ready",
+                run_status_from="running",
+                run_status_to="running",
+                severity="info",
+                summary="parent mismatch",
+                evidence=None,
+                next_action=None,
+                context=None,
+                idempotency_key="parent-mismatch-event",
+            )
+
+    def test_ledger_event_queries_order_by_occurred_at(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="ordering-test",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=3,
+            source="manual",
+            external_id=None,
+        )
+        run_id = self.store.create_run(
+            task_id=task_id,
+            project="demo",
+            trigger_type="manual",
+            trigger_ref="cli:test",
+            adapter="mock",
+            agent_name="codex-e",
+            idempotency_key="ordering-test-run",
+        )
+
+        first_event_id = self.store.append_ledger_event(
+            project="demo",
+            task_id=task_id,
+            run_id=run_id,
+            trigger_id=None,
+            parent_event_id=None,
+            event_family="feedback",
+            event_type="progress.reported",
+            actor_type="agent",
+            actor_id="codex-e",
+            source_type="manual",
+            source_ref="cli:test",
+            status_from="ready",
+            status_to="in_progress",
+            run_status_from="running",
+            run_status_to="running",
+            severity="info",
+            summary="later event inserted first",
+            evidence=None,
+            next_action=None,
+            context=None,
+            idempotency_key="ordering-test-1",
+            occurred_at="2026-04-02 12:00:00",
+        )
+        second_event_id = self.store.append_ledger_event(
+            project="demo",
+            task_id=task_id,
+            run_id=run_id,
+            trigger_id=None,
+            parent_event_id=first_event_id,
+            event_family="feedback",
+            event_type="handoff.recorded",
+            actor_type="human",
+            actor_id="reviewer",
+            source_type="manual",
+            source_ref="cli:test",
+            status_from="in_progress",
+            status_to="in_progress",
+            run_status_from="running",
+            run_status_to="running",
+            severity="info",
+            summary="earlier event inserted second",
+            evidence=None,
+            next_action=None,
+            context=None,
+            idempotency_key="ordering-test-2",
+            occurred_at="2026-04-02 09:00:00",
+        )
+
+        task_rows = self.store.list_task_timeline(task_id, limit=10)
+        audit_rows = self.store.list_project_audit_events("demo", limit=10)
+        project_rows = self.store.list_project_events("demo", after_id=0, limit=10)
+        project_rows_after_first = self.store.list_project_events("demo", after_id=first_event_id, limit=10)
+
+        self.assertEqual(first_event_id, int(task_rows[0]["id"]))
+        self.assertEqual("progress.reported", task_rows[0]["event_type"])
+        self.assertEqual(second_event_id, int(task_rows[1]["id"]))
+        self.assertEqual(first_event_id, int(audit_rows[0]["id"]))
+        self.assertEqual(second_event_id, int(audit_rows[1]["id"]))
+        self.assertEqual(first_event_id, int(project_rows[0]["id"]))
+        self.assertEqual(second_event_id, int(project_rows[1]["id"]))
+        self.assertEqual(1, len(project_rows_after_first))
+        self.assertEqual(second_event_id, int(project_rows_after_first[0]["id"]))
+
     def test_terminal_status_cannot_reopen(self) -> None:
         self.store.create_project("demo", "example/demo")
         task_id = self.store.add_task(
