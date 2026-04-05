@@ -135,16 +135,18 @@ Open `http://127.0.0.1:8787`.
 
 ## Testing
 
-```bash
-cd "$(git rev-parse --show-toplevel)"
-PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v
-```
-
-PR-blocking E2E suite (same entry used by GitHub Actions):
+Quick PR gate, matching the blocking GitHub Actions job:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 ./scripts/run_pr_blocking_e2e.sh
+```
+
+Full Python test suite, matching the non-blocking PR workflow:
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+./scripts/run_full_python_tests.sh
 ```
 
 ## Plugin Packaging
