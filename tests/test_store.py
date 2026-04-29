@@ -33,6 +33,92 @@ class StoreTests(unittest.TestCase):
         tasks = self.store.list_tasks("kthena")
         self.assertEqual(task_id, tasks[0].id)
         self.assertEqual("controller partition revision bug", tasks[0].title)
+        self.assertEqual("task", tasks[0].issue_type)
+        self.assertEqual("medium", tasks[0].risk_level)
+
+    def test_add_task_accepts_jira_lite_issue_fields(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="approve external publish",
+            description="agent needs to post a summary",
+            issue_type="incident",
+            priority=5,
+            impact=5,
+            effort=2,
+            success_criteria="human approval is recorded before posting",
+            risk_level="critical",
+            reporter="ops-lead",
+            environment="prod",
+            source="manual",
+            external_id="approval-1",
+        )
+
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertEqual("incident", task.issue_type)
+        self.assertEqual("critical", task.risk_level)
+        self.assertEqual("ops-lead", task.reporter)
+        self.assertEqual("prod", task.environment)
+        self.assertEqual("human approval is recorded before posting", task.success_criteria)
+
+    def test_task_dependencies_are_project_scoped(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        blocker_id = self.store.add_task(
+            project="demo",
+            title="finish auth migration",
+            description=None,
+            priority=4,
+            impact=4,
+            effort=3,
+            source=None,
+            external_id=None,
+        )
+        blocked_id = self.store.add_task(
+            project="demo",
+            title="ship dashboard",
+            description=None,
+            priority=4,
+            impact=4,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+
+        dep_id = self.store.add_task_dependency(blocked_id, blocker_id, "depends_on")
+        deps = self.store.list_task_dependencies(blocked_id)
+
+        self.assertGreater(dep_id, 0)
+        self.assertEqual(1, len(deps))
+        self.assertEqual(blocked_id, int(deps[0]["blocked_task_id"]))
+        self.assertEqual(blocker_id, int(deps[0]["blocking_task_id"]))
+        self.assertEqual("depends_on", deps[0]["kind"])
+
+    def test_agent_native_statuses_can_flow_through_approval_and_failure(self) -> None:
+        self.store.create_project("demo", "example/demo")
+        task_id = self.store.add_task(
+            project="demo",
+            title="approval task",
+            description=None,
+            priority=3,
+            impact=3,
+            effort=2,
+            source=None,
+            external_id=None,
+        )
+
+        self.store.move_task(task_id, "ready", "ready")
+        self.store.move_task(task_id, "in_progress", "claimed")
+        self.store.move_task(task_id, "waiting_for_approval", "needs approval")
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertEqual("waiting_for_approval", task.status)
+
+        self.store.move_task(task_id, "failed", "approval timed out")
+        self.store.move_task(task_id, "ready", "retry")
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertEqual("ready", task.status)
 
     def test_next_task_ranking(self) -> None:
         self.store.create_project("demo", None)

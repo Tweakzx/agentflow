@@ -5,6 +5,18 @@ from pathlib import Path
 
 from .store import Store
 
+BOARD_STATUSES = [
+    "todo",
+    "ready",
+    "in_progress",
+    "waiting_for_approval",
+    "review",
+    "blocked",
+    "failed",
+    "done",
+    "dropped",
+]
+
 
 def export_markdown(store: Store, out_dir: str, project: str | None = None) -> list[str]:
     Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -23,7 +35,7 @@ def export_markdown(store: Store, out_dir: str, project: str | None = None) -> l
 
         out_path = Path(out_dir) / f"{project_name}-board.md"
         lines = [f"# {project_name} task board", ""]
-        for status in ["todo", "ready", "in_progress", "review", "done", "blocked", "dropped"]:
+        for status in BOARD_STATUSES:
             lines.append(f"## {status}")
             group = status_groups.get(status, [])
             if not group:
@@ -31,7 +43,7 @@ def export_markdown(store: Store, out_dir: str, project: str | None = None) -> l
             else:
                 for t in group:
                     ext = f" ({t.source}:{t.external_id})" if t.source and t.external_id else ""
-                    lines.append(f"- [{t.id}] {t.title}{ext}")
+                    lines.append(f"- [{t.id}] {t.issue_type} {t.title} ({t.risk_level} risk){ext}")
             lines.append("")
 
         out_path.write_text("\n".join(lines), encoding="utf-8")
@@ -41,7 +53,7 @@ def export_markdown(store: Store, out_dir: str, project: str | None = None) -> l
 
 
 def build_dashboard_html(store: Store) -> str:
-    statuses = ["todo", "ready", "in_progress", "review", "done", "blocked", "dropped"]
+    statuses = BOARD_STATUSES
     rows = []
     for project in store.projects():
         counts = store.status_counts(project)

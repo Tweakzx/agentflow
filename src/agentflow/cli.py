@@ -34,9 +34,14 @@ def _parser() -> argparse.ArgumentParser:
     p_add.add_argument("--project", required=True)
     p_add.add_argument("--title", required=True)
     p_add.add_argument("--description")
+    p_add.add_argument("--issue-type", default="task")
     p_add.add_argument("--priority", type=int, default=3)
     p_add.add_argument("--impact", type=int, default=3)
     p_add.add_argument("--effort", type=int, default=3)
+    p_add.add_argument("--success-criteria")
+    p_add.add_argument("--risk-level", default="medium")
+    p_add.add_argument("--reporter")
+    p_add.add_argument("--environment")
     p_add.add_argument("--source")
     p_add.add_argument("--external-id")
 
@@ -165,13 +170,14 @@ def _print_tasks(tasks) -> None:
     if not tasks:
         print("(no tasks)")
         return
-    print("id  project  status       pri imp eff score  agent         lease_until           title")
-    print("--  -------  -----------  --- --- --- -----  ------------  -------------------  -----")
+    print("id  project  type      status                 risk      pri imp eff score  agent         lease_until           title")
+    print("--  -------  --------  ---------------------  --------  --- --- --- -----  ------------  -------------------  -----")
     for t in tasks:
         agent = t.assigned_agent or "-"
         lease = t.lease_until or "-"
         print(
-            f"{t.id:<3} {t.project:<8} {t.status:<11}  {t.priority:<3} {t.impact:<3} {t.effort:<3} {t.score:<5.1f}  {agent:<12}  {lease:<19}  {t.title}"
+            f"{t.id:<3} {t.project:<8} {t.issue_type:<8}  {t.status:<21}  {t.risk_level:<8}  "
+            f"{t.priority:<3} {t.impact:<3} {t.effort:<3} {t.score:<5.1f}  {agent:<12}  {lease:<19}  {t.title}"
         )
 
 
@@ -206,9 +212,14 @@ def main() -> None:
             project=args.project,
             title=args.title,
             description=args.description,
+            issue_type=args.issue_type,
             priority=args.priority,
             impact=args.impact,
             effort=args.effort,
+            success_criteria=args.success_criteria,
+            risk_level=args.risk_level,
+            reporter=args.reporter,
+            environment=args.environment,
             source=args.source,
             external_id=args.external_id,
         )

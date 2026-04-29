@@ -17,10 +17,15 @@ CREATE TABLE IF NOT EXISTS tasks (
     project_id INTEGER NOT NULL,
     title TEXT NOT NULL,
     description TEXT,
+    issue_type TEXT NOT NULL DEFAULT 'task',
     status TEXT NOT NULL DEFAULT 'todo',
     priority INTEGER NOT NULL DEFAULT 3 CHECK(priority BETWEEN 1 AND 5),
     impact INTEGER NOT NULL DEFAULT 3 CHECK(impact BETWEEN 1 AND 5),
     effort INTEGER NOT NULL DEFAULT 3 CHECK(effort BETWEEN 1 AND 5),
+    success_criteria TEXT,
+    risk_level TEXT NOT NULL DEFAULT 'medium',
+    reporter TEXT,
+    environment TEXT,
     source TEXT,
     external_id TEXT,
     branch TEXT,
@@ -48,6 +53,17 @@ CREATE TABLE IF NOT EXISTS links (
     kind TEXT NOT NULL,
     url TEXT NOT NULL,
     FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS task_dependencies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blocked_task_id INTEGER NOT NULL,
+    blocking_task_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'blocks',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(blocked_task_id, blocking_task_id, kind),
+    FOREIGN KEY(blocked_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY(blocking_task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS runs (
@@ -172,10 +188,24 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
 
     # Lightweight forward-only migrations for existing local DB files.
+    if not _column_exists(conn, "tasks", "issue_type"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN issue_type TEXT NOT NULL DEFAULT 'task'")
+    if not _column_exists(conn, "tasks", "success_criteria"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN success_criteria TEXT")
+    if not _column_exists(conn, "tasks", "risk_level"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN risk_level TEXT NOT NULL DEFAULT 'medium'")
+    if not _column_exists(conn, "tasks", "reporter"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN reporter TEXT")
+    if not _column_exists(conn, "tasks", "environment"):
+        conn.execute("ALTER TABLE tasks ADD COLUMN environment TEXT")
     if not _column_exists(conn, "tasks", "assigned_agent"):
         conn.execute("ALTER TABLE tasks ADD COLUMN assigned_agent TEXT")
     if not _column_exists(conn, "tasks", "lease_until"):
         conn.execute("ALTER TABLE tasks ADD COLUMN lease_until TEXT")
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_issue_type ON tasks(project_id, issue_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocked ON task_dependencies(blocked_task_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocking ON task_dependencies(blocking_task_id)")
 
     # Normalize legacy status names into the current lifecycle model.
     conn.execute(

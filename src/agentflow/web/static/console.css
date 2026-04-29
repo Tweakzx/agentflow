@@ -115,19 +115,23 @@ input, select {
 .stage-todo { background: #e8f0ff; color: var(--c-todo); border-color: #bfd4ff; }
 .stage-ready { background: #efe9ff; color: var(--c-ready); border-color: #d8c8ff; }
 .stage-executing, .stage-in_progress { background: #e4f7f4; color: var(--c-executing); border-color: #b5ece4; }
+.stage-waiting_for_approval { background: #fff7d6; color: #a16207; border-color: #fde68a; }
 .stage-review { background: #fff4e6; color: var(--c-review); border-color: #ffdcb1; }
 .stage-done { background: #e7f8ea; color: var(--c-done); border-color: #bdeec7; }
 .stage-blocked { background: #ffe8e8; color: var(--c-blocked); border-color: #ffc2c2; }
-.status-todo, .status-ready, .status-in-progress, .status-review, .status-done, .status-dropped, .status-blocked {
+.stage-failed { background: #ffe8e8; color: var(--c-blocked); border-color: #ffc2c2; }
+.status-todo, .status-ready, .status-in-progress, .status-waiting-for-approval, .status-review, .status-done, .status-dropped, .status-blocked, .status-failed {
   font-weight: 600;
 }
 .status-todo { color: var(--c-todo); }
 .status-ready { color: var(--c-ready); }
 .status-in-progress { color: var(--c-executing); }
+.status-waiting-for-approval { color: #a16207; }
 .status-review { color: var(--c-review); }
 .status-done { color: var(--c-done); }
 .status-dropped { color: #64748b; }
 .status-blocked { color: var(--c-blocked); }
+.status-failed { color: var(--c-blocked); }
 
 /* ── Task Detail Redesign ── */
 
@@ -219,6 +223,9 @@ input, select {
 .tag-impact-med  { background: #fff4e6; color: var(--c-review); border-color: #ffdcb1; }
 .tag-impact-low  { background: #e7f8ea; color: var(--c-done); border-color: #bdeec7; }
 .tag-effort { background: #e8f0ff; color: var(--c-todo); border-color: #bfd4ff; }
+.tag-risk-critical, .tag-risk-high { background: #ffe8e8; color: var(--c-blocked); border-color: #ffc2c2; }
+.tag-risk-medium { background: #fff4e6; color: var(--c-review); border-color: #ffdcb1; }
+.tag-risk-low { background: #e7f8ea; color: var(--c-done); border-color: #bdeec7; }
 
 /* Description */
 .detail-description {
