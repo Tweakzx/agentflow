@@ -13,20 +13,27 @@ STATUSES = {
     "todo",
     "ready",
     "in_progress",
+    "waiting_for_approval",
     "review",
     "done",
     "dropped",
     "blocked",
+    "failed",
 }
 
-ACTIVE_STATUSES = {"todo", "ready", "in_progress", "review", "blocked"}
+ISSUE_TYPES = {"task", "bug", "story", "sub_task", "incident", "research"}
+RISK_LEVELS = {"low", "medium", "high", "critical"}
+
+ACTIVE_STATUSES = {"todo", "ready", "in_progress", "waiting_for_approval", "review", "blocked", "failed"}
 CLAIMABLE_STATUSES = {"todo", "ready"}
 ALLOWED_TRANSITIONS = {
     "todo": {"ready", "blocked", "dropped"},
     "ready": {"todo", "in_progress", "review", "blocked", "dropped"},
-    "in_progress": {"ready", "review", "blocked"},
+    "in_progress": {"ready", "waiting_for_approval", "review", "blocked", "failed"},
+    "waiting_for_approval": {"ready", "in_progress", "review", "blocked", "failed"},
     "review": {"ready", "done", "blocked"},
-    "blocked": {"todo", "ready", "in_progress", "dropped"},
+    "blocked": {"todo", "ready", "in_progress", "waiting_for_approval", "dropped"},
+    "failed": {"ready", "blocked", "dropped"},
     "done": set(),
     "dropped": set(),
 }
@@ -43,10 +50,15 @@ class Task:
     project: str
     title: str
     description: str | None
+    issue_type: str
     status: str
     priority: int
     impact: int
     effort: int
+    success_criteria: str | None
+    risk_level: str
+    reporter: str | None
+    environment: str | None
     source: str | None
     external_id: str | None
     pr_url: str | None
@@ -110,18 +122,42 @@ class Store:
         effort: int,
         source: str | None,
         external_id: str | None,
+        issue_type: str = "task",
+        success_criteria: str | None = None,
+        risk_level: str = "medium",
+        reporter: str | None = None,
+        environment: str | None = None,
     ) -> int:
         self._validate_score("priority", priority)
         self._validate_score("impact", impact)
         self._validate_score("effort", effort)
+        issue_type = self._normalize_issue_type(issue_type)
+        risk_level = self._normalize_risk_level(risk_level)
         with self.connect() as conn:
             project_id = self._project_id(conn, project)
             cur = conn.execute(
                 """
-                INSERT INTO tasks(project_id, title, description, status, priority, impact, effort, source, external_id)
-                VALUES(?, ?, ?, 'todo', ?, ?, ?, ?, ?)
+                INSERT INTO tasks(
+                    project_id, title, description, issue_type, status, priority, impact, effort,
+                    success_criteria, risk_level, reporter, environment, source, external_id
+                )
+                VALUES(?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (project_id, title, description, priority, impact, effort, source, external_id),
+                (
+                    project_id,
+                    title,
+                    description,
+                    issue_type,
+                    priority,
+                    impact,
+                    effort,
+                    success_criteria,
+                    risk_level,
+                    reporter,
+                    environment,
+                    source,
+                    external_id,
+                ),
             )
             task_id = int(cur.lastrowid)
             conn.execute(
@@ -133,6 +169,20 @@ class Store:
     def _validate_score(self, name: str, value: int) -> None:
         if not isinstance(value, int) or value < 1 or value > 5:
             raise ValueError(f"{name} must be an integer between 1 and 5")
+
+    def _normalize_issue_type(self, issue_type: str) -> str:
+        normalized = issue_type.strip().lower().replace("-", "_")
+        if normalized not in ISSUE_TYPES:
+            valid = ", ".join(sorted(ISSUE_TYPES))
+            raise ValueError(f"Invalid issue_type: {issue_type}. Valid issue types: {valid}")
+        return normalized
+
+    def _normalize_risk_level(self, risk_level: str) -> str:
+        normalized = risk_level.strip().lower()
+        if normalized not in RISK_LEVELS:
+            valid = ", ".join(sorted(RISK_LEVELS))
+            raise ValueError(f"Invalid risk_level: {risk_level}. Valid risk levels: {valid}")
+        return normalized
 
     def create_run(
         self,
@@ -767,8 +817,10 @@ class Store:
 
     def _base_task_sql(self) -> str:
         return """
-            SELECT t.id, p.name AS project, t.title, t.description, t.status, t.priority, t.impact, t.effort,
-                   t.source, t.external_id, t.pr_url, t.assigned_agent, t.lease_until
+            SELECT t.id, p.name AS project, t.title, t.description, t.issue_type, t.status,
+                   t.priority, t.impact, t.effort, t.success_criteria, t.risk_level,
+                   t.reporter, t.environment, t.source, t.external_id, t.pr_url,
+                   t.assigned_agent, t.lease_until
             FROM tasks t
             JOIN projects p ON p.id = t.project_id
         """
@@ -1070,8 +1122,8 @@ class Store:
                 """
                 UPDATE tasks
                 SET status = ?,
-                    assigned_agent = CASE WHEN ? IN ('done', 'dropped', 'blocked', 'ready', 'todo', 'review') THEN NULL ELSE assigned_agent END,
-                    lease_until = CASE WHEN ? IN ('done', 'dropped', 'blocked', 'ready', 'todo', 'review') THEN NULL ELSE lease_until END,
+                    assigned_agent = CASE WHEN ? IN ('done', 'dropped', 'blocked', 'ready', 'todo', 'review', 'waiting_for_approval', 'failed') THEN NULL ELSE assigned_agent END,
+                    lease_until = CASE WHEN ? IN ('done', 'dropped', 'blocked', 'ready', 'todo', 'review', 'waiting_for_approval', 'failed') THEN NULL ELSE lease_until END,
                     updated_at = datetime('now')
                 WHERE id = ?
                 """,
@@ -1089,6 +1141,54 @@ class Store:
                 status_to=to_status,
                 ledger_event=ledger_event,
             )
+
+    def add_task_dependency(self, blocked_task_id: int, blocking_task_id: int, kind: str = "blocks") -> int:
+        kind = kind.strip().lower().replace("-", "_") or "blocks"
+        if kind not in {"blocks", "depends_on"}:
+            raise ValueError("dependency kind must be blocks or depends_on")
+        with self.connect() as conn:
+            blocked = conn.execute("SELECT project_id FROM tasks WHERE id = ?", (blocked_task_id,)).fetchone()
+            blocking = conn.execute("SELECT project_id FROM tasks WHERE id = ?", (blocking_task_id,)).fetchone()
+            if blocked is None:
+                raise ValueError(f"Task {blocked_task_id} not found")
+            if blocking is None:
+                raise ValueError(f"Task {blocking_task_id} not found")
+            if int(blocked["project_id"]) != int(blocking["project_id"]):
+                raise ValueError("Task dependencies must stay within one project")
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO task_dependencies(blocked_task_id, blocking_task_id, kind)
+                VALUES(?, ?, ?)
+                """,
+                (blocked_task_id, blocking_task_id, kind),
+            )
+            row = conn.execute(
+                """
+                SELECT id FROM task_dependencies
+                WHERE blocked_task_id = ? AND blocking_task_id = ? AND kind = ?
+                """,
+                (blocked_task_id, blocking_task_id, kind),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Task dependency insert failed")
+            return int(row["id"])
+
+    def list_task_dependencies(self, task_id: int) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT td.id, td.blocked_task_id, blocked.title AS blocked_title,
+                       td.blocking_task_id, blocking.title AS blocking_title,
+                       td.kind, td.created_at
+                FROM task_dependencies td
+                JOIN tasks blocked ON blocked.id = td.blocked_task_id
+                JOIN tasks blocking ON blocking.id = td.blocking_task_id
+                WHERE td.blocked_task_id = ? OR td.blocking_task_id = ?
+                ORDER BY td.id ASC
+                """,
+                (task_id, task_id),
+            ).fetchall()
+            return list(rows)
 
     def _validate_transition(self, from_status: str, to_status: str) -> None:
         from_status = self._normalize_status(from_status)

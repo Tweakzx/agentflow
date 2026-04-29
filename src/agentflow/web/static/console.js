@@ -15,8 +15,10 @@
         todo: true,
         ready: true,
         in_progress: true,
+        waiting_for_approval: true,
         review: true,
         blocked: true,
+        failed: true,
         done: false,
         dropped: false,
       },
@@ -40,15 +42,17 @@
       if (status === 'todo') return 'todo';
       if (status === 'ready') return 'ready';
       if (status === 'in_progress') return 'in_progress';
+      if (status === 'waiting_for_approval') return 'waiting_for_approval';
       if (status === 'review') return 'review';
       if (status === 'done') return 'done';
       if (status === 'dropped') return 'dropped';
       if (status === 'blocked') return 'blocked';
+      if (status === 'failed') return 'failed';
       return 'other';
     }
 
     function statusOrder() {
-      return ['todo', 'ready', 'in_progress', 'review', 'blocked', 'done', 'dropped'];
+      return ['todo', 'ready', 'in_progress', 'waiting_for_approval', 'review', 'blocked', 'failed', 'done', 'dropped'];
     }
 
     async function loadProjects() {
@@ -125,6 +129,8 @@
             <div class="task ${state.selectedTask && state.selectedTask.id === t.id ? 'active' : ''}" onclick="openTask(${t.id})">
               <div class="task-title">#${t.id} ${t.title}</div>
               <div class="meta">
+                <span>${t.issue_type || 'task'}</span>
+                <span>${t.risk_level || 'medium'} risk</span>
                 <span>p${t.priority}/i${t.impact}/e${t.effort}</span>
                 <span>${t.assigned_agent || '-'}</span>
               </div>
@@ -190,6 +196,7 @@
       const prUrl = links.pr_url || '';
       const repo = links.repo || '';
       const prCandidates = links.pr_candidates || [];
+      const dependencies = data.dependencies || [];
       const allRuns = (data.recent_runs || data.runs || []).slice(0, 5);
       const timelineRows = (data.timeline || []).slice(0, 20);
       const recommendedActions = Array.isArray(derived.recommended_actions) ? derived.recommended_actions : [];
@@ -204,6 +211,8 @@
       let summaryText = '';
       let needsAttention = false;
       if (stage === 'blocked') { summaryText = 'Task is blocked and needs your attention.'; needsAttention = true; }
+      else if (stage === 'waiting_for_approval') { summaryText = 'Agent is waiting for human approval before continuing.'; needsAttention = true; }
+      else if (stage === 'failed') { summaryText = 'Last agent attempt failed. Review the run details or retry.'; needsAttention = true; }
       else if (stage === 'review') { summaryText = derived.latest_risk ? 'Agent completed but flagged a risk. Please review.' : 'Agent completed work. Please review.'; }
       else if (stage === 'in_progress') { summaryText = `Agent is working on this task.${t.assigned_agent ? ' (' + t.assigned_agent + ')' : ''}`; }
       else if (stage === 'ready') { summaryText = 'Ready to be picked up by an agent.'; }
@@ -224,6 +233,17 @@
           <button onclick="runTask(${t.id})">Retry</button>
           <button class="btn-unblock" onclick="moveTask(${t.id},'ready','Unblocked by human',true)">Unblock</button>
           <button class="btn-reject" onclick="moveTask(${t.id},'dropped','Dropped by human',true)">Drop</button>
+        `;
+      } else if (stage === 'waiting_for_approval') {
+        actionButtons = `
+          <button class="btn-approve" onclick="moveTask(${t.id},'in_progress','Approved via console',false)">Approve</button>
+          <button class="btn-reject" onclick="moveTask(${t.id},'blocked','Approval denied via console',false)">Deny</button>
+        `;
+      } else if (stage === 'failed') {
+        actionButtons = `
+          <button onclick="moveTask(${t.id},'ready','Retry after failure',false)">Retry</button>
+          <button class="btn-block" onclick="moveTask(${t.id},'blocked','Failure needs triage',false)">Triage</button>
+          <button class="btn-reject" onclick="moveTask(${t.id},'dropped','Dropped after failure',false)">Drop</button>
         `;
       } else if (stage === 'in_progress') {
         actionButtons = `
@@ -248,7 +268,10 @@
           </div>
           <div class="detail-summary ${needsAttention ? 'summary-alert' : ''}">${summaryText}</div>
           ${t.description ? `<div class="detail-description">${t.description}</div>` : ''}
+          ${t.success_criteria ? `<div class="detail-description"><strong>Success criteria:</strong> ${t.success_criteria}</div>` : ''}
           <div class="detail-tag-row">
+            <span class="tag-badge">${(t.issue_type || 'task').replace('_',' ')}</span>
+            <span class="tag-badge tag-risk-${t.risk_level || 'medium'}">Risk: ${t.risk_level || 'medium'}</span>
             <span class="tag-badge tag-priority-${t.priority >= 4 ? 'high' : t.priority >= 3 ? 'med' : 'low'}">${priorityLabel(t.priority)}</span>
             <span class="tag-badge tag-impact-${t.impact >= 4 ? 'high' : t.impact >= 3 ? 'med' : 'low'}">Impact: ${impactLabel(t.impact)}</span>
             <span class="tag-badge tag-effort">Effort: ${effortLabel(t.effort)}</span>
@@ -256,6 +279,8 @@
           <div class="detail-meta-row">
             <span class="meta-chip"><span class="meta-chip-label">Source</span> ${t.source || '-'}</span>
             ${t.external_id ? `<span class="meta-chip">${t.external_id}</span>` : ''}
+            ${t.reporter ? `<span class="meta-chip"><span class="meta-chip-label">Reporter</span> ${t.reporter}</span>` : ''}
+            ${t.environment ? `<span class="meta-chip"><span class="meta-chip-label">Environment</span> ${t.environment}</span>` : ''}
             <span class="meta-chip"><span class="meta-chip-label">Agent</span> ${t.assigned_agent || '-'}</span>
           </div>
           ${(repo || issueUrl || prUrl || prCandidates.length) ? `
@@ -305,10 +330,12 @@
                     <option value="todo">todo</option>
                     <option value="ready">ready</option>
                     <option value="in_progress">in_progress</option>
+                    <option value="waiting_for_approval">waiting_for_approval</option>
                     <option value="review">review</option>
                     <option value="done">done</option>
                     <option value="dropped">dropped</option>
                     <option value="blocked">blocked</option>
+                    <option value="failed">failed</option>
                   </select>
                   <label class="force-label"><input id="moveForceCk" type="checkbox" />force</label>
                   <button class="secondary sm" onclick="moveTask(${t.id},null,null,null)">Move</button>
@@ -328,10 +355,12 @@
                     <option value="todo">todo</option>
                     <option value="ready">ready</option>
                     <option value="in_progress">in_progress</option>
+                    <option value="waiting_for_approval">waiting_for_approval</option>
                     <option value="review">review</option>
                     <option value="done">done</option>
                     <option value="dropped">dropped</option>
                     <option value="blocked">blocked</option>
+                    <option value="failed">failed</option>
                   </select>
                   <label class="force-label"><input id="moveForceCk" type="checkbox" />force</label>
                   <button class="secondary sm" onclick="moveTask(${t.id},null,null,null)">Move</button>
@@ -388,16 +417,31 @@
           <div class="detail-section">
             <div class="section-title">Signals</div>
             <div class="signal-grid">
-              ${signalCard('Progress', derived.latest_progress, 'signal-progress')}
-              ${signalCard('Handoff', derived.latest_handoff, 'signal-handoff')}
-              ${signalCard('Risk', derived.latest_risk, 'signal-risk')}
+              ${signalCard('Latest Progress', derived.latest_progress, 'signal-progress')}
+              ${signalCard('Latest Handoff', derived.latest_handoff, 'signal-handoff')}
+              ${signalCard('Latest Risk', derived.latest_risk, 'signal-risk')}
             </div>
             ${recommendedActions.length ? `
               <div class="recommended-actions">
-                <span class="rec-label">Suggested:</span>
+                <span class="rec-label">Recommended Actions</span>
                 ${recommendedActions.map(a => `<span class="action-tag">${a.label || a.id || '-'}</span>`).join('')}
               </div>
             ` : ''}
+          </div>
+        ` : ''}
+
+        ${dependencies.length ? `
+          <div class="detail-section">
+            <div class="section-title">Dependencies</div>
+            ${dependencies.map(d => `
+              <div class="run-card">
+                <span class="run-id">#${d.blocked_task_id}</span>
+                <span>${d.blocked_title}</span>
+                <span class="meta-chip">${d.kind}</span>
+                <span class="run-id">#${d.blocking_task_id}</span>
+                <span>${d.blocking_title}</span>
+              </div>
+            `).join('')}
           </div>
         ` : ''}
 
@@ -504,6 +548,8 @@
       const to = e.status_to || '';
       if (to === 'done') return 'tl-done';
       if (to === 'blocked') return 'tl-blocked';
+      if (to === 'waiting_for_approval') return 'tl-blocked';
+      if (to === 'failed') return 'tl-blocked';
       if (to === 'in_progress') return 'tl-in_progress';
       if (to === 'review') return 'tl-review';
       if (to === 'ready') return 'tl-ready';

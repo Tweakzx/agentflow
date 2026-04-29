@@ -724,10 +724,12 @@ def _flow_stage_for_status(status: str) -> str:
         "todo": "todo",
         "ready": "ready",
         "in_progress": "in_progress",
+        "waiting_for_approval": "waiting_for_approval",
         "review": "review",
         "done": "done",
         "dropped": "dropped",
         "blocked": "blocked",
+        "failed": "failed",
     }
     return mapping.get(status, "other")
 
@@ -881,12 +883,19 @@ def _create_task_from_payload(store: Store, payload: dict[str, Any]) -> dict[str
             project=project,
             title=title,
             description=str(payload.get("description")) if payload.get("description") is not None else None,
+            issue_type=str(payload.get("issue_type") or payload.get("type") or "task"),
             priority=priority,
             impact=impact,
             effort=effort,
+            success_criteria=str(payload.get("success_criteria")) if payload.get("success_criteria") is not None else None,
+            risk_level=str(payload.get("risk_level") or "medium"),
+            reporter=str(payload.get("reporter")) if payload.get("reporter") is not None else None,
+            environment=str(payload.get("environment")) if payload.get("environment") is not None else None,
             source=str(payload.get("source")) if payload.get("source") is not None else None,
             external_id=str(payload.get("external_id")) if payload.get("external_id") is not None else None,
         )
+        for raw_blocker in payload.get("blocked_by", []) if isinstance(payload.get("blocked_by"), list) else []:
+            store.add_task_dependency(task_id, int(raw_blocker), "depends_on")
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     task = store.get_task(task_id)
@@ -897,9 +906,11 @@ def _validate_manual_transition(from_status: str, to_status: str) -> str | None:
     allowed = {
         "todo": {"ready", "blocked", "dropped"},
         "ready": {"todo", "in_progress", "review", "blocked", "dropped"},
-        "in_progress": {"ready", "review", "blocked"},
+        "in_progress": {"ready", "waiting_for_approval", "review", "blocked", "failed"},
+        "waiting_for_approval": {"ready", "in_progress", "review", "blocked", "failed"},
         "review": {"ready", "done", "blocked"},
-        "blocked": {"todo", "ready", "in_progress", "dropped"},
+        "blocked": {"todo", "ready", "in_progress", "waiting_for_approval", "dropped"},
+        "failed": {"ready", "blocked", "dropped"},
         "done": set(),
         "dropped": set(),
     }
@@ -1139,6 +1150,7 @@ def _build_handler(
                         run["steps"] = [_row_to_dict(s) for s in store.list_run_steps(int(run["id"]))]
                     timeline = store.list_task_timeline(task_id, limit=50)
                     history = [_row_to_dict(h) for h in store.list_status_history(task_id)]
+                    dependencies = [_row_to_dict(d) for d in store.list_task_dependencies(task_id)]
                     task_dict = _task_to_dict(task)
                     repo = store.get_project_repo(task.project)
                     latest_run = recent_runs[0] if recent_runs else None
@@ -1156,6 +1168,7 @@ def _build_handler(
                             "recent_runs": recent_runs,
                             "timeline": timeline,
                             "history": history,
+                            "dependencies": dependencies,
                             "links": links,
                             "pr_summary": pr_summary,
                             "derived_summary": derive_task_summary(timeline),
